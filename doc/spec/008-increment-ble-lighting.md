@@ -44,4 +44,6 @@ No board was flashed. Radio behavior, advertising/reconnect and BLE/RMT coexiste
 
 ## Dependencies and open questions
 
+Hardware feedback (2026-09-08): the user sees advertising on the USB serial monitor and confirms BLE Scanner displays the custom service and characteristics. The user subsequently clarified that reading produces no visible value, so successful characteristic reads are not yet established. Connect/disconnect serial messages were not visible. Diagnostics now include identity, explicit connection/disconnection handles, MTU and GATT access results, and native USB is the primary console instead of secondary output. The cause of the missing messages is not confirmed; verify the revised firmware on the board. Service visibility alone does not establish successful read/write/reconnect behavior. AC3 and AC4 remain pending.
+
 Uses completed Group A controls (increments 002-007). Group B remains a separate pending increment. NVS is used for radio calibration, not bonds or lighting settings; initialization does not automatically erase existing NVS contents.

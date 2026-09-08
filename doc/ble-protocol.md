@@ -77,6 +77,10 @@ print(struct.pack('<I', 10000).hex(' '))       # 10-second period for 000a
 
 ## Build and verification
 
+Console output uses the board's native USB Serial/JTAG port as the primary console. Open the USB serial monitor before connecting. Expected INFO messages include `BLE identity`, `Advertising as Lighthouse`, `BLE connected: handle=...`, `GATT read/write`, and `BLE disconnected: handle=... reason=...`. These are firmware serial logs, not BLE notifications.
+
+If services can be read but connection logs are missing, confirm the new firmware was flashed, remove serial-monitor tag filters, and check that `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`. The previous UART0-primary / USB-secondary configuration used non-blocking secondary output, which can lose messages. The logging change addresses that possible cause; it does not establish why a particular earlier message was missing.
+
 The tracked `sdkconfig.defaults` enables NimBLE, peripheral/server roles and a single connection, and disables pairing. The existing local sdkconfig has also been updated. An older sdkconfig takes precedence over defaults: in `idf.py menuconfig`, enable Bluetooth/NimBLE and disable NimBLE Security (SMP), with maximum connections set to one. Alternatively, build with a new SDKCONFIG path and these defaults. The source deliberately rejects a build with pairing enabled.
 
 Build with `idf.py build`. NVS initializes for radio calibration; no automatic erase is performed if NVS initialization fails. Errors are logged and local lighting continues. Advertising starts asynchronously after host synchronization; check the serial `Advertising as Lighthouse` message.

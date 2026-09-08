@@ -39,7 +39,6 @@ static bool initialized;
 static int gatt_access(uint16_t connection, uint16_t attribute,
                        struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    (void)connection;
     (void)attribute;
     ble_light_field_t field = (ble_light_field_t)(uintptr_t)arg;
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
@@ -49,6 +48,8 @@ static int gatt_access(uint16_t connection, uint16_t attribute,
     uint8_t value[BLE_LIGHT_VALUE_MAX];
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         int result = ble_light_read(&requested, field, value, sizeof(value));
+        ESP_LOGI(TAG, "GATT read: conn=%u field=%s result=0x%02x",
+                 connection, ble_light_field_name(field), result);
         if (result) return result;
         return os_mbuf_append(ctxt->om, value, ble_light_field_size(field)) == 0 ?
                0 : BLE_ATT_ERR_INSUFFICIENT_RES;
@@ -56,13 +57,19 @@ static int gatt_access(uint16_t connection, uint16_t attribute,
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         size_t length = OS_MBUF_PKTLEN(ctxt->om);
         if (length != ble_light_field_size(field) || length > sizeof(value)) {
+            ESP_LOGW(TAG, "GATT write rejected: conn=%u field=%s length=%u expected=%u",
+                     connection, ble_light_field_name(field), (unsigned)length,
+                     (unsigned)ble_light_field_size(field));
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         }
         uint16_t copied;
         if (ble_hs_mbuf_to_flat(ctxt->om, value, sizeof(value), &copied) != 0 || copied != length) {
             return BLE_ATT_ERR_UNLIKELY;
         }
-        return ble_light_write(&requested, field, value, copied);
+        int result = ble_light_write(&requested, field, value, copied);
+        ESP_LOGI(TAG, "GATT write: conn=%u field=%s result=0x%02x",
+                 connection, ble_light_field_name(field), result);
+        return result;
     }
     return BLE_ATT_ERR_UNLIKELY;
 }
@@ -74,12 +81,21 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     (void)arg;
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
-        ESP_LOGI(TAG, "Connection status=%d", event->connect.status);
-        if (event->connect.status != 0) advertise();
+        if (event->connect.status == 0) {
+            ESP_LOGI(TAG, "BLE connected: handle=%u", event->connect.conn_handle);
+        } else {
+            ESP_LOGW(TAG, "BLE connection failed: status=%d", event->connect.status);
+            advertise();
+        }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
-        ESP_LOGI(TAG, "Disconnected: reason=%d", event->disconnect.reason);
+        ESP_LOGI(TAG, "BLE disconnected: handle=%u reason=0x%03x",
+                 event->disconnect.conn.conn_handle, event->disconnect.reason);
         advertise();
+        break;
+    case BLE_GAP_EVENT_MTU:
+        ESP_LOGI(TAG, "BLE MTU updated: handle=%u mtu=%u",
+                 event->mtu.conn_handle, event->mtu.value);
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
         advertise();
@@ -126,6 +142,13 @@ static void on_sync(void)
     if (rc != 0) {
         ESP_LOGE(TAG, "BLE address setup failed: rc=%d", rc);
         return;
+    }
+    uint8_t address[6];
+    rc = ble_hs_id_copy_addr(own_addr_type, address, NULL);
+    if (rc == 0) {
+        ESP_LOGI(TAG, "BLE identity: %02X:%02X:%02X:%02X:%02X:%02X type=%u",
+                 address[5], address[4], address[3], address[2], address[1], address[0],
+                 own_addr_type);
     }
     advertise();
 }

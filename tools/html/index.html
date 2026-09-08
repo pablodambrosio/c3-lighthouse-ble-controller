@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lighthouse · Group A</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header><div><p class="eyebrow">LIGHTHOUSE / LOCAL BLE CONTROL</p><h1>A little light.<br>A lot of atmosphere.</h1></div><span id="connection" class="badge">Disconnected</span></header>
+  <section class="connection card" aria-label="Connection">
+    <div><h2>Connect your lighthouse</h2><p>Close BLE Scanner’s connection first. Settings stay on the device after disconnecting.</p></div>
+    <div class="actions"><button id="connect" class="primary">Connect via Bluetooth</button><button id="disconnect" disabled>Disconnect</button></div>
+  </section>
+  <p id="status" role="status" aria-live="polite">Connect to load the current Group A settings.</p>
+  <form id="form">
+    <fieldset id="controls" disabled>
+      <div class="layout">
+        <div class="stack">
+          <section class="card"><div class="section-title"><h2>01 / Light</h2><label class="toggle"><input id="on" type="checkbox"> On after applying</label></div>
+            <label for="effect">Effect</label><select id="effect"><option value="0">Solid</option><option value="1">Lighthouse</option><option value="2">Candle</option><option value="4">Sparkles</option></select>
+            <label for="brightness">Brightness <output id="brightness-label">100%</output></label>
+            <input id="brightness" type="range" min="0" max="100" step="0.1" value="100">
+            <p class="hint">Shared relative luminance for both colors.</p>
+            <label for="period_ms">Lighthouse rotation · milliseconds</label><input id="period_ms" type="number" min="0" max="4294967295" step="1" value="10000" required>
+            <p class="hint">One revolution. Minimum 60 ms for Lighthouse; ignored by other effects.</p>
+          </section>
+          <section class="card"><h2>02 / Color</h2>
+            <label for="color_mode">Color mode</label><select id="color_mode"><option value="0">Mono · one color</option><option value="1">Gradient · start → end → start</option></select>
+            <div class="colors">
+              <div><label for="color-picker">Start color</label><input id="color-picker" type="color" value="#ff9900"><div class="coordinates"><label>x<input id="color-x" type="number" step="any" required></label><label>y<input id="color-y" type="number" step="any" required></label></div></div>
+              <div><label for="gradient_end-picker">Gradient end</label><input id="gradient_end-picker" type="color" value="#bb55ff"><div class="coordinates"><label>x<input id="gradient_end-x" type="number" step="any" required></label><label>y<input id="gradient_end-y" type="number" step="any" required></label></div></div>
+            </div>
+            <p class="hint">Pickers set chromaticity only. Black maps to white; use brightness or power to darken the LEDs. Exact x,y values are preserved until edited. End color is used in Gradient mode.</p>
+          </section>
+          <section class="card"><h2>03 / Movement</h2>
+            <label for="shift_mode">Color shifting</label><select id="shift_mode"><option value="0">Static</option><option value="1">Cycle</option><option value="2">Random</option></select>
+            <p class="hint">Cycle sweeps hues in Mono or rotates the Gradient. Random shifts each LED independently.</p>
+            <label for="shift_period_ms">Shift period · milliseconds</label><input id="shift_period_ms" type="number" min="0" max="4294967295" step="1" value="7000" required>
+            <p class="hint">Must be greater than zero for Cycle and Random.</p>
+          </section>
+        </div>
+        <aside class="stack"><section class="card preview"><p class="eyebrow">GROUP A · SIX LEDS</p><div id="ring" aria-label="Static color layout preview"></div><h2>Color layout</h2><p class="hint">Approximate static colors, before effects or shifting. Screen colors are not calibrated to your LEDs.</p></section>
+          <section class="card"><h2>Send to lighthouse</h2><p>Edits stay here until you apply. Multi-field updates briefly turn the lights off, then restore your chosen power state.</p><button type="submit" class="primary wide">Apply settings</button><button id="refresh" type="button" class="wide">Read device / discard edits</button><button id="off" type="button" class="wide">Turn off now</button><p class="hint">Writes are sequential, not atomic. Readback confirms accepted commands, not measured light output.</p></section>
+        </aside>
+      </div>
+    </fieldset>
+  </form>
+  <details class="card"><summary>Activity log</summary><pre id="log" aria-live="polite"></pre></details>
+  <footer>Protocol v1 · Group A only · No account, cloud, or build step.</footer>
+</main><script type="module" src="app.mjs"></script>
+</body></html>

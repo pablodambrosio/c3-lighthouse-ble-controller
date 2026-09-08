@@ -63,6 +63,8 @@ Each phase can be split into smaller, independently verifiable increments using 
 
 ## Current state and documentation
 
+Use the [browser BLE controller](tools/html/README.md) to configure Group A with buttons, a brightness slider, and color pickers. Run `node tools/html/server.mjs` and open `http://127.0.0.1:8080` in a Web Bluetooth browser.
+
 The ESP-IDF firmware controls Group A as `big_light` through `set_big_light(const big_light_settings_t *settings)`. Settings include `on`, `effect`, and a `color` containing only CIE `x`, `y`, and a separate shared float `brightness` (relative luminance from 0.0 to 1.0). `light_color_from_rgb(r,g,b)` converts standard sRGB input; the default output map uses sRGB primaries and D65 white pending device calibration. A single lighting task converts to raw LED PWM and applies queued updates. Startup selects `LIGHT_EFFECT_SPARKLES` using the current raw color in `main.c` through `light_color_from_pwm` and its matching `light_brightness_from_pwm` helper. Each LED independently sparkles with a quick rise, a slower fade, and dark gaps, using the selected hue and brightness. Sparkles and candle modes ignore `period_ms`. Solid LEDs retain their frame while powered; animation refreshes at each step. After restoring LED power separately, resubmit settings or reboot the controller for an immediate update.
 
 Connect GPIO4 through the data level buffer to the first LED's DIN, power Group A directly from the LED supply, and connect a common ground. GPIO5-7 remain unused. The [Group A spec](doc/spec/001-increment-group-a-lighting.md) describes the six-position mapping; adjust `chain_index` in `main/group_a.c` if wiring differs from position order. `on = false` currently sends black; MOSFET switching belongs to phase 3.
