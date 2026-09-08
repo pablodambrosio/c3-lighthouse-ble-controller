@@ -1,7 +1,7 @@
 # Specification index
 
 Status: Active  
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 This folder contains plain Markdown development specifications. Each spec describes one increment: a small, independently verifiable change.
 
@@ -9,16 +9,27 @@ See the [project README](../README.md) for the lighthouse concept, planned hardw
 
 The [lighting API guide](lighting-api.md) documents the `big_light` and `house_lights` settings and control functions.
 
+## Phase 1 progress
+
+Group A's light-control feature set is complete as of 2026-09-08: solid, lighthouse, candle and sparkles effects; MONO/GRADIENT colors; STATIC/CYCLE/RANDOM shifting; and separate shared brightness. Increments 002-007 are completed.
+
+Increment 001 remains In progress solely for six-LED hardware verification: mapping/color order, visual behavior and a 10-minute stability run. Group B window lighting remains unimplemented; `set_house_lights()` is a stub. Phase 1 therefore remains In progress. Phase 2 BLE control is underway in increment 008; phase 3 power management remains planned.
+
+The [BLE protocol guide](ble-protocol.md) defines bondless connection behavior, GATT UUIDs, wire formats and error handling.
+
 ## Specifications
 
 | ID | Increment | Status | Last updated |
 | --- | --- | --- | --- |
 | 000 | [Documentation foundation](spec/000-increment-documentation.md) | Completed | 2026-09-05 |
-| 001 | [Group A lighting](spec/001-increment-group-a-lighting.md) | In progress | 2026-09-07 |
+| 001 | [Group A lighting](spec/001-increment-group-a-lighting.md) | In progress | 2026-09-08 |
 | 002 | [XY and brightness](spec/002-increment-xy-brightness.md) | Completed | 2026-09-07 |
 | 003 | [Simple lighthouse rotation](spec/003-increment-simple-lighthouse.md) | Completed | 2026-09-07 |
 | 004 | [Lighthouse crossfade](spec/004-increment-lighthouse-crossfade.md) | Completed | 2026-09-07 |
 | 005 | [Candle with moving illumination](spec/005-increment-candle.md) | Completed | 2026-09-07 |
+| 006 | [Sparkles](spec/006-increment-sparkles.md) | Completed | 2026-09-08 |
+| 007 | [Color modes and shifting](spec/007-increment-color-modes.md) | Completed | 2026-09-08 |
+| 008 | [Bondless BLE lighting control](spec/008-increment-ble-lighting.md) | In progress | 2026-09-08 |
 
 ## Conventions
 

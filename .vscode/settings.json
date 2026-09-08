@@ -33,5 +33,5 @@
     "--compile-commands-dir=c:\\Users\\pauli\\Documents\\esp32\\lighthouse\\build"
   ],
   "idf.flashType": "UART",
-  "idf.portWin": "COM3"
+  "idf.portWin": "COM4"
 }

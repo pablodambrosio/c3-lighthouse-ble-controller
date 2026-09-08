@@ -6,6 +6,8 @@
 #include "freertos/task.h"
 #include "group_a.h"
 #include "candle.h"
+#include "sparkles.h"
+#include "color_pattern.h"
 
 #define LIGHTING_QUEUE_LENGTH 4
 #define LIGHTING_FPS 24
@@ -49,15 +51,53 @@ static uint8_t lighthouse_frame(TickType_t phase, TickType_t period, light_rgb_t
     return scaled / period;
 }
 
+static esp_err_t patterned_frame(const big_light_settings_t *settings, uint64_t ticks,
+                                 TickType_t rotation_period, uint32_t seed)
+{
+    light_rgb_t pixels[GROUP_A_LED_COUNT];
+    uint64_t elapsed_ms = ticks * 1000 / configTICK_RATE_HZ;
+    esp_err_t err = color_pattern_render(settings, elapsed_ms, seed, pixels);
+    if (err != ESP_OK) return err;
+    if (settings->effect == LIGHT_EFFECT_LIGHT_HOUSE) {
+        uint64_t scaled = (ticks % rotation_period) * GROUP_A_LED_COUNT;
+        unsigned position = scaled / rotation_period;
+        unsigned next = (position + 1) % GROUP_A_LED_COUNT;
+        uint64_t fraction = scaled % rotation_period;
+        for (unsigned i = 0; i < GROUP_A_LED_COUNT; ++i) {
+            light_rgb_t color = pixels[i];
+            light_rgb_t incoming = {
+                fade_channel(color.r, fraction, rotation_period),
+                fade_channel(color.g, fraction, rotation_period),
+                fade_channel(color.b, fraction, rotation_period),
+            };
+            pixels[i] = i == next ? incoming : i == position ? (light_rgb_t){
+                color.r - incoming.r, color.g - incoming.g, color.b - incoming.b
+            } : (light_rgb_t){0};
+        }
+    } else if (settings->effect == LIGHT_EFFECT_CANDLE || settings->effect == LIGHT_EFFECT_SPARKLES) {
+        light_rgb_t levels[GROUP_A_LED_COUNT];
+        light_rgb_t white = {255, 255, 255};
+        if (settings->effect == LIGHT_EFFECT_CANDLE) candle_render(elapsed_ms, seed, white, levels);
+        else sparkles_render(elapsed_ms, seed, white, levels);
+        for (unsigned i = 0; i < GROUP_A_LED_COUNT; ++i) {
+            pixels[i].r = (pixels[i].r * levels[i].r + 127) / 255;
+            pixels[i].g = (pixels[i].g * levels[i].r + 127) / 255;
+            pixels[i].b = (pixels[i].b * levels[i].r + 127) / 255;
+        }
+    }
+    return group_a_set_frame(pixels);
+}
+
 static void lighting_task(void *argument)
 {
     QueueHandle_t queue = (QueueHandle_t)argument;
     big_light_settings_t settings;
     light_rgb_t pwm = {0};
     bool animating = false;
-    uint64_t candle_elapsed_ticks = 0;
-    TickType_t candle_sampled = 0;
-    uint32_t candle_seed = 0xa341316cu;
+    bool patterned = false;
+    uint64_t effect_elapsed_ticks = 0;
+    TickType_t effect_sampled = 0;
+    uint32_t effect_seed = 0xa341316cu;
     TickType_t cycle_started = 0;
     TickType_t frame_started = 0;
     uint8_t frame_index = 0;
@@ -75,28 +115,33 @@ static void lighting_task(void *argument)
         bool updated = xQueueReceive(queue, &settings, wait) == pdTRUE;
         esp_err_t err;
         if (updated) {
-            light_color_t color = settings.color;
+            float brightness = settings.brightness;
             if (!settings.on) {
-                color.brightness = 0.0f;
+                brightness = 0.0f;
             }
-            err = light_color_to_pwm(color, &pwm);
+            err = light_color_to_pwm(settings.color, brightness, &pwm);
             if (err != ESP_OK) {
                 animating = false;
                 ESP_LOGE(TAG, "Invalid queued color: %s", esp_err_to_name(err));
                 continue;
             }
-            animating = settings.on && (settings.effect == LIGHT_EFFECT_LIGHT_HOUSE ||
-                                       settings.effect == LIGHT_EFFECT_CANDLE) &&
-                       (pwm.r != 0 || pwm.g != 0 || pwm.b != 0);
+            patterned = settings.color_mode != LIGHT_COLOR_MONO || settings.shift_mode != LIGHT_SHIFT_STATIC;
+            animating = settings.on && (settings.shift_mode != LIGHT_SHIFT_STATIC ||
+                                       settings.effect == LIGHT_EFFECT_LIGHT_HOUSE ||
+                                       settings.effect == LIGHT_EFFECT_CANDLE ||
+                                       settings.effect == LIGHT_EFFECT_SPARKLES) &&
+                       (patterned ? settings.brightness > 0 :
+                        (pwm.r != 0 || pwm.g != 0 || pwm.b != 0));
             // Restart effect timing; lighthouse begins at position 0.
             period_ticks = lighthouse_period_ticks(settings.period_ms);
             cycle_started = xTaskGetTickCount();
             frame_started = cycle_started;
             frame_index = 0;
-            candle_elapsed_ticks = 0;
-            candle_sampled = cycle_started;
-            if (settings.effect == LIGHT_EFFECT_CANDLE) {
-                candle_seed = (candle_seed + 0x9e3779b9u) ^ cycle_started;
+            effect_elapsed_ticks = 0;
+            effect_sampled = cycle_started;
+            if (settings.effect == LIGHT_EFFECT_CANDLE || settings.effect == LIGHT_EFFECT_SPARKLES ||
+                settings.shift_mode == LIGHT_SHIFT_RANDOM) {
+                effect_seed = (effect_seed + 0x9e3779b9u) ^ cycle_started;
             }
         } else if (animating) {
             TickType_t elapsed = xTaskGetTickCount() - frame_started;
@@ -109,13 +154,23 @@ static void lighting_task(void *argument)
             continue;
         }
 
-        if (animating && settings.effect == LIGHT_EFFECT_CANDLE) {
+        if (animating) {
             TickType_t now = xTaskGetTickCount();
-            candle_elapsed_ticks += (TickType_t)(now - candle_sampled);
-            candle_sampled = now;
+            effect_elapsed_ticks += (TickType_t)(now - effect_sampled);
+            effect_sampled = now;
+        }
+        if (patterned && settings.on && settings.brightness > 0) {
+            err = patterned_frame(&settings, effect_elapsed_ticks, period_ticks, effect_seed);
+        } else if (animating && (settings.effect == LIGHT_EFFECT_CANDLE ||
+                                settings.effect == LIGHT_EFFECT_SPARKLES)) {
             light_rgb_t pixels[GROUP_A_LED_COUNT];
-            candle_render(candle_elapsed_ticks * 1000 / configTICK_RATE_HZ,
-                          candle_seed, pwm, pixels);
+            if (settings.effect == LIGHT_EFFECT_SPARKLES) {
+                sparkles_render(effect_elapsed_ticks * 1000 / configTICK_RATE_HZ,
+                                effect_seed, pwm, pixels);
+            } else {
+                candle_render(effect_elapsed_ticks * 1000 / configTICK_RATE_HZ,
+                              effect_seed, pwm, pixels);
+            }
             err = group_a_set_frame(pixels);
         } else if (animating) {
             TickType_t elapsed = xTaskGetTickCount() - cycle_started;
@@ -134,12 +189,14 @@ static void lighting_task(void *argument)
             continue;
         }
         if (updated) {
-            ESP_LOGI(TAG, "big_light applied: on=%d, effect=%d, period_ms=%lu, xy=(%.5f,%.5f), B=%.5f, PWM=(%u,%u,%u)",
+            ESP_LOGI(TAG, "big_light applied: on=%d, effect=%d, period_ms=%lu, xy=(%.5f,%.5f), B=%.5f, PWM=(%u,%u,%u), color_mode=%d, shift_mode=%d, shift_period_ms=%lu",
                  (int)settings.on, (int)settings.effect,
                  (unsigned long)settings.period_ms,
                  (double)settings.color.x, (double)settings.color.y,
-                 (double)(settings.on ? settings.color.brightness : 0.0f),
-                 (unsigned)pwm.r, (unsigned)pwm.g, (unsigned)pwm.b);
+                 (double)(settings.on ? settings.brightness : 0.0f),
+                 (unsigned)pwm.r, (unsigned)pwm.g, (unsigned)pwm.b,
+                 (int)settings.color_mode, (int)settings.shift_mode,
+                 (unsigned long)settings.shift_period_ms);
         }
     }
 }
@@ -183,19 +240,17 @@ esp_err_t set_big_light(const big_light_settings_t *settings)
     switch (settings->effect) {
     case LIGHT_EFFECT_SOLID:
     case LIGHT_EFFECT_CANDLE:
+    case LIGHT_EFFECT_SPARKLES:
         break;
     case LIGHT_EFFECT_LIGHT_HOUSE:
         if (lighthouse_period_ticks(settings->period_ms) == 0) {
             return ESP_ERR_INVALID_ARG;
         }
         break;
-    case LIGHT_EFFECT_COLOR_LOOP:
-        return ESP_ERR_NOT_SUPPORTED;
     default:
         return ESP_ERR_INVALID_ARG;
     }
-    light_rgb_t pwm;
-    esp_err_t err = light_color_to_pwm(settings->color, &pwm);
+    esp_err_t err = color_pattern_validate(settings);
     if (err != ESP_OK) {
         return err;
     }

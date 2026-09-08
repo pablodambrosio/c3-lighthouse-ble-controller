@@ -29,6 +29,8 @@ static light_rgb_t candle_frames[128][GROUP_A_LED_COUNT];
 static big_light_settings_t queued;
 static bool queue_full;
 static uint32_t command_period_ms = 1500;
+static light_color_mode_t command_color_mode;
+static light_shift_mode_t command_shift_mode;
 
 QueueHandle_t xQueueCreate(unsigned length, unsigned size)
 {
@@ -69,9 +71,14 @@ BaseType_t xQueueReceive(QueueHandle_t queue, void *item, TickType_t wait)
         .effect = (event.command == -5 || event.command == -6) ? LIGHT_EFFECT_CANDLE :
                   event.command < 0 ? LIGHT_EFFECT_LIGHT_HOUSE : (light_effect_t)event.command,
         .color = light_color_from_pwm((light_rgb_t){255, 150, 30}),
+        .brightness = light_brightness_from_pwm((light_rgb_t){255, 150, 30}),
         .period_ms = event.command == -4 ? 1000 : command_period_ms,
+        .color_mode = command_color_mode,
+        .shift_mode = command_shift_mode,
+        .gradient_end = {0.15f, 0.06f},
+        .shift_period_ms = 6000,
     };
-    if (event.command == -3 || event.command == -6) settings.color.brightness = 0;
+    if (event.command == -3 || event.command == -6) settings.brightness = 0;
     *(big_light_settings_t *)item = settings;
     return pdTRUE;
 }
@@ -103,7 +110,9 @@ esp_err_t group_a_set_frame(const light_rgb_t pixels[GROUP_A_LED_COUNT])
 {
     CHECK(frame_count < 128);
     for (int i = 0; i < GROUP_A_LED_COUNT; ++i) {
-        CHECK(pixels[i].r <= 255 && pixels[i].g <= 150 && pixels[i].b <= 30);
+        if (command_color_mode == LIGHT_COLOR_MONO && command_shift_mode == LIGHT_SHIFT_STATIC) {
+            CHECK(pixels[i].r <= 255 && pixels[i].g <= 150 && pixels[i].b <= 30);
+        }
         candle_frames[frame_count][i] = pixels[i];
     }
     return frame(-2, pixels[0]);
@@ -122,7 +131,7 @@ int main(void)
     if (setjmp(finished) != 0) return failure;
     CHECK(lighting_init() == ESP_OK);
     big_light_settings_t settings = {.on = true, .effect = LIGHT_EFFECT_LIGHT_HOUSE,
-                                     .color = BIG_LIGHT_WHITE, .period_ms = 1500};
+                                     .color = BIG_LIGHT_WHITE, .brightness = 1.0f, .period_ms = 1500};
     CHECK(set_big_light(&settings) == ESP_OK);
     CHECK(queued.effect == LIGHT_EFFECT_LIGHT_HOUSE);
     CHECK(queued.period_ms == 1500);
@@ -142,8 +151,10 @@ int main(void)
     settings.effect = LIGHT_EFFECT_CANDLE;
     settings.period_ms = 0; // Candle does not require a rotation period.
     CHECK(set_big_light(&settings) == ESP_OK);
-    settings.effect = LIGHT_EFFECT_COLOR_LOOP;
-    CHECK(set_big_light(&settings) == ESP_ERR_NOT_SUPPORTED);
+    settings.effect = LIGHT_EFFECT_SPARKLES;
+    CHECK(set_big_light(&settings) == ESP_OK); // No rotation period required.
+    settings.effect = (light_effect_t)3; // Removed effect ID must stay invalid.
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
     settings.effect = (light_effect_t)99;
     CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
     CHECK(set_big_light(NULL) == ESP_ERR_INVALID_ARG);
@@ -283,6 +294,101 @@ int main(void)
         {portMAX_DELAY, 0, 2}, {5, 5, -1}, {portMAX_DELAY, 0, -5},
     };
     result = simulate(candle_failure, 3, 0);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(positions[2] == -1 && colors[2].r == 0);
+    fail_frame = -1;
+    const event_t sparkle_script[] = {
+        {portMAX_DELAY, 0, 4}, {5, 5, -1}, {4, 30, -1},
+        {3, 1, -2}, {portMAX_DELAY, 0, 4}, {5, 1, 0},
+        {portMAX_DELAY, 0, 2}, {5, 1, 4}, {5, 1, -4},
+    };
+    result = simulate(sparkle_script, 9, UINT32_MAX - 7);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(frame_count == 9 && positions[0] == -2 && positions[2] == -2);
+    CHECK(positions[3] == -1 && colors[3].r == 0);
+    CHECK(positions[4] == -2 && positions[5] == -1 && colors[5].r == 255);
+    CHECK(positions[6] == -2 && positions[7] == -2 && positions[8] == 0);
+    fail_frame = 1;
+    const event_t sparkle_failure[] = {
+        {portMAX_DELAY, 0, 4}, {5, 5, -1}, {portMAX_DELAY, 0, -2},
+    };
+    result = simulate(sparkle_failure, 3, 0);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(positions[2] == -1 && colors[2].r == 0);
+    fail_frame = -1;
+    settings = (big_light_settings_t){.on = true, .effect = LIGHT_EFFECT_SOLID,
+        .color = BIG_LIGHT_WHITE, .brightness = 1.0f, .color_mode = LIGHT_COLOR_GRADIENT,
+        .gradient_end = {0.15f, 0.06f}, .shift_mode = LIGHT_SHIFT_CYCLE,
+        .shift_period_ms = 6000};
+    CHECK(set_big_light(&settings) == ESP_OK);
+    CHECK(queued.color_mode == LIGHT_COLOR_GRADIENT && queued.shift_period_ms == 6000);
+    settings.gradient_end.y = 0;
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
+    CHECK(queued.gradient_end.y == 0.06f); // Rejected settings leave the queue untouched.
+    settings.gradient_end.y = 0.06f;
+    settings.shift_period_ms = 0;
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
+    settings.shift_period_ms = 6000;
+    settings.color_mode = (light_color_mode_t)99;
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
+    settings.color_mode = LIGHT_COLOR_MONO;
+    settings.shift_mode = (light_shift_mode_t)99;
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
+
+    // All color/shift combinations compose with every lighting effect.
+    command_period_ms = 1500;
+    const int effects[] = {0, 1, 2, 4};
+    for (volatile int mode = 0; mode <= 1; ++mode) for (volatile int shift = 0; shift <= 2; ++shift) {
+        command_color_mode = (light_color_mode_t)mode;
+        command_shift_mode = (light_shift_mode_t)shift;
+        if (mode == 0 && shift == 0) continue; // Covered by preceding regression cases.
+        for (volatile unsigned e = 0; e < sizeof(effects) / sizeof(effects[0]); ++e) {
+            bool animated = effects[e] != 0 || shift != 0;
+            event_t script[] = {
+                {portMAX_DELAY, 0, effects[e]},
+                {animated ? FRAME_WAIT : portMAX_DELAY, 1, -2},
+                {portMAX_DELAY, 0, effects[e]},
+                {animated ? FRAME_WAIT : portMAX_DELAY, 1, -3},
+            };
+            result = simulate(script, 4, UINT32_MAX - 1);
+            if (result) return result;
+            if (setjmp(finished) != 0) return failure;
+            CHECK(positions[0] == -2 && positions[2] == -2);
+            CHECK(positions[1] == -1 && colors[1].r == 0 && colors[1].g == 0 && colors[1].b == 0);
+            CHECK(positions[3] == -1 && colors[3].r == 0 && colors[3].g == 0 && colors[3].b == 0);
+        }
+    }
+    command_color_mode = LIGHT_COLOR_GRADIENT;
+    command_shift_mode = LIGHT_SHIFT_CYCLE;
+    const event_t pattern_script[] = {
+        {portMAX_DELAY, 0, 0}, {5, 5, -1}, {4, 95, -1}, {5, 1, 1},
+        {5, 1, 2}, {5, 1, 4}, {5, 1, -2},
+    };
+    result = simulate(pattern_script, 7, UINT32_MAX - 7);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(frame_count == 7 && positions[6] == -1 && colors[6].r == 0);
+    settings = (big_light_settings_t){.on = true, .effect = LIGHT_EFFECT_SOLID,
+        .color = light_color_from_pwm((light_rgb_t){255, 150, 30}),
+        .brightness = light_brightness_from_pwm((light_rgb_t){255, 150, 30}),
+        .color_mode = LIGHT_COLOR_GRADIENT, .gradient_end = {0.15f, 0.06f},
+        .shift_mode = LIGHT_SHIFT_CYCLE, .shift_period_ms = 6000};
+    light_rgb_t expected_pixels[GROUP_A_LED_COUNT];
+    CHECK(color_pattern_render(&settings, 1000, 0, expected_pixels) == ESP_OK);
+    for (int i = 0; i < GROUP_A_LED_COUNT; ++i) {
+        CHECK(candle_frames[2][i].r == expected_pixels[i].r);
+        CHECK(candle_frames[2][i].g == expected_pixels[i].g);
+        CHECK(candle_frames[2][i].b == expected_pixels[i].b);
+        if (i != 0) CHECK(candle_frames[3][i].r == 0 && candle_frames[3][i].g == 0 && candle_frames[3][i].b == 0);
+    }
+    fail_frame = 1;
+    const event_t pattern_failure[] = {
+        {portMAX_DELAY, 0, 0}, {5, 5, -1}, {portMAX_DELAY, 0, -2},
+    };
+    result = simulate(pattern_failure, 3, 0);
     if (result) return result;
     if (setjmp(finished) != 0) return failure;
     CHECK(positions[2] == -1 && colors[2].r == 0);

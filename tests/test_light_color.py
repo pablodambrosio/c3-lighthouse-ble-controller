@@ -73,8 +73,12 @@ SECTIONS {
         "-I", str(ROOT / "main"), str(output / "start.S"),
         str(ROOT / "main" / "light_color.c"),
         str(ROOT / "main" / "candle.c"),
+        str(ROOT / "main" / "sparkles.c"),
+        str(ROOT / "main" / "color_pattern.c"),
+        *([str(ROOT / "main" / "ble_light_protocol.c")] if suite == "ble" else []),
         str(ROOT / "tests" / {"color": "test_light_color.c", "lighthouse": "test_lighthouse.c",
-                               "candle": "test_candle.c"}[suite]),
+                               "candle": "test_candle.c", "sparkles": "test_sparkles.c",
+                               "pattern": "test_color_pattern.c", "ble": "test_ble_light.c"}[suite]),
         "-T", str(output / "link.ld"), "-lm", "-o", str(executable),
     ], check=True)
     env = os.environ.copy()
@@ -89,6 +93,12 @@ SECTIONS {
     if suite == "color":
         print("PASS: reference colours, sRGB gamma, 14097 PWM round trips, dimming, "
               "brightness limiting, invalid inputs and output preservation (RISC-V/QEMU).")
+    elif suite == "ble":
+        print("PASS: BLE fields, endian encoding, validation, rejected-write preservation, queue pressure and Group B unsupported (RISC-V/QEMU).")
+    elif suite == "pattern":
+        print("PASS: color modes, shifts, xy interpolation, periods, random independence and validation (RISC-V/QEMU).")
+    elif suite == "sparkles":
+        print("PASS: independent sparkles, dark gaps, hue, bounds, seeds and frame skipping (RISC-V/QEMU).")
     elif suite == "candle":
         print("PASS: candle hue preservation, brightness bounds, moving light, "
               "temporal continuity, seed variation and deterministic frame skipping (RISC-V/QEMU).")
@@ -100,6 +110,6 @@ SECTIONS {
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools", type=Path, default=Path("C:/Espressif/tools"))
-    parser.add_argument("--suite", choices=["color", "lighthouse", "candle"], default="color")
+    parser.add_argument("--suite", choices=["color", "lighthouse", "candle", "sparkles", "pattern", "ble"], default="color")
     args = parser.parse_args()
     run(args.tools, args.suite)

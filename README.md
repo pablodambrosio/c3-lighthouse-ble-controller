@@ -1,7 +1,7 @@
 # Lighthouse
 
 Status: In progress  
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 Lighthouse is a battery-powered lighting controller for a laser-cut 3D lighthouse model assembled from flat panels. It will simulate a rotating lighthouse light and illuminate the model's windows using two groups of addressable LEDs.
 
@@ -11,7 +11,7 @@ The model is described here as a **slot-together model**: a construction in whic
 
 | Component | Purpose |
 | --- | --- |
-| Seeed Studio XIAO ESP32C3 | Run the lighting effects and the future Bluetooth Low Energy (BLE) interface. |
+| Seeed Studio XIAO ESP32C3 | Run the lighting effects and Bluetooth Low Energy (BLE) interface. |
 | Battery | Power the lighthouse. |
 | DC-DC converter | Convert the battery voltage to the supply required by the LED groups. |
 | Group A: 6 WS2812B LEDs | Simulate the rotating lighthouse light. |
@@ -55,21 +55,21 @@ Five LEDs will be placed inside the lighthouse to light its windows. This group 
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 - LED driver and lighting effects | Implement WS2812B control for both groups, the rotating light animation for group A, and window illumination for group B. | In progress |
-| 2 - BLE interface | Add a Bluetooth Low Energy interface for controlling the lighting. Define the supported controls and BLE protocol in the phase's specs. | Planned |
+| 1 - LED driver and lighting effects | Group A light-control features complete; Group A hardware verification and Group B window lighting remain pending. | In progress |
+| 2 - BLE interface | Bondless NimBLE GATT control implemented; connection and radio/LED coexistence verification pending. | In progress |
 | 3 - Power management | Reduce battery consumption using ESP32C3 deep sleep and MOSFET switches that cut power to both LED groups during sleep. Define sleep entry, wake-up behavior, and power sequencing in the phase's specs. | Planned |
 
 Each phase can be split into smaller, independently verifiable increments using the `doc/spec/NNN-increment-name.md` convention.
 
 ## Current state and documentation
 
-The ESP-IDF firmware controls Group A as `big_light` through `set_big_light(const big_light_settings_t *settings)`. Settings include `on`, `effect`, and a `color` containing CIE `x`, `y` and float `brightness` (relative luminance from 0.0 to 1.0). `light_color_from_rgb(r,g,b)` converts standard sRGB input; the default output map uses sRGB primaries and D65 white pending device calibration. A single lighting task converts to raw LED PWM and applies queued updates. Startup selects `LIGHT_EFFECT_CANDLE` using the current raw color in `main.c` through `light_color_from_pwm`. Its six positions combine a wandering bright region with smooth local flicker, all using the selected hue and brightness; candle mode ignores `period_ms`. Solid LEDs retain their frame while powered; animation refreshes at each step. After restoring LED power separately, resubmit settings or reboot the controller for an immediate update.
+The ESP-IDF firmware controls Group A as `big_light` through `set_big_light(const big_light_settings_t *settings)`. Settings include `on`, `effect`, and a `color` containing only CIE `x`, `y`, and a separate shared float `brightness` (relative luminance from 0.0 to 1.0). `light_color_from_rgb(r,g,b)` converts standard sRGB input; the default output map uses sRGB primaries and D65 white pending device calibration. A single lighting task converts to raw LED PWM and applies queued updates. Startup selects `LIGHT_EFFECT_SPARKLES` using the current raw color in `main.c` through `light_color_from_pwm` and its matching `light_brightness_from_pwm` helper. Each LED independently sparkles with a quick rise, a slower fade, and dark gaps, using the selected hue and brightness. Sparkles and candle modes ignore `period_ms`. Solid LEDs retain their frame while powered; animation refreshes at each step. After restoring LED power separately, resubmit settings or reboot the controller for an immediate update.
 
 Connect GPIO4 through the data level buffer to the first LED's DIN, power Group A directly from the LED supply, and connect a common ground. GPIO5-7 remain unused. The [Group A spec](doc/spec/001-increment-group-a-lighting.md) describes the six-position mapping; adjust `chain_index` in `main/group_a.c` if wiring differs from position order. `on = false` currently sends black; MOSFET switching belongs to phase 3.
 
 From an ESP-IDF 6.0 terminal, build with `idf.py build`. To test on the board, use `idf.py -p COM3 flash monitor`, replacing `COM3` if needed. The first build downloads the pinned LED driver. Exit the serial monitor with `Ctrl+]`.
 
-Solid, lighthouse and candle lighting are implemented. Only the color-loop effect remains reserved and returns `ESP_ERR_NOT_SUPPORTED`. Group B is named `house_lights`; its settings type and setter are defined, but the setter also returns `ESP_ERR_NOT_SUPPORTED`. BLE and power management remain planned. See the [lighting API guide](doc/lighting-api.md) for the calling contract and an example.
+Solid, lighthouse, candle and sparkles lighting are implemented. Independent color settings support MONO or a two-endpoint xy GRADIENT, with STATIC, CYCLE or per-LED RANDOM shifting controlled by `shift_period_ms`. Startup currently uses GRADIENT + RANDOM. Group B is named `house_lights`; its settings type and setter are defined, but the setter returns `ESP_ERR_NOT_SUPPORTED`. BLE control is implemented with hardware verification pending; power management remains planned. See the [BLE protocol guide](doc/ble-protocol.md) for connection details and all GATT controls. See the [lighting API guide](doc/lighting-api.md) for the calling contract and an example.
 
 - [Specification index](doc/README.md): increment status, last updated dates, and workflow conventions.
 - [Specification template](doc/SPEC_TEMPLATE.md): starting point for each new increment.
