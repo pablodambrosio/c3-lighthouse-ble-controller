@@ -20,17 +20,17 @@ Use **Write Request / write with response** for edits, and await the response be
 
 | NNNN | Control | Bytes | Encoding / permitted values |
 | --- | --- | --- | --- |
-| 0001 | Protocol/capabilities (read-only) | 5 | `01 17 03 07 01`: version 1; effect bitmask; color-mode bitmask; shift-mode bitmask; supported groups bitmask (A=bit 0, B=bit 1). |
+| 0001 | Protocol/capabilities (read-only) | 5 | `01 37 03 07 03`: version 1; effect bitmask; color-mode bitmask; shift-mode bitmask; supported groups bitmask (A=bit 0, B=bit 1). |
 | 0002 | Group A on | 1 | 0=off, 1=on. |
-| 0003 | Effect | 1 | 0=SOLID, 1=LIGHT_HOUSE, 2=CANDLE, 4=SPARKLES. ID 3 is invalid. |
+| 0003 | Effect | 1 | 0=SOLID, 1=LIGHT_HOUSE, 2=CANDLE, 4=SPARKLES, 5=BREATHING. ID 3 is invalid. |
 | 0004 | Color x,y | 8 | Two little-endian IEEE-754 float32 values, x followed by y. |
 | 0005 | Shared brightness | 4 | Little-endian float32, finite and within [0,1]. Relative luminance, as in the lighting API. |
-| 0006 | Rotation period | 4 | Little-endian uint32 milliseconds; at least 60 ms for lighthouse at the configured 100 Hz RTOS rate. Ignored by other effects. |
+| 0006 | Rotation / breath period | 4 | Little-endian uint32 milliseconds; at least 60 ms for lighthouse or breathing at the configured 100 Hz RTOS rate. Ignored by other effects. |
 | 0007 | Color mode | 1 | 0=MONO, 1=GRADIENT. |
 | 0008 | Gradient end x,y | 8 | Two little-endian float32 values; both endpoints use the shared brightness. |
 | 0009 | Shift mode | 1 | 0=STATIC, 1=CYCLE, 2=RANDOM. |
 | 000a | Shift period | 4 | Little-endian uint32 milliseconds; nonzero for CYCLE/RANDOM. Ignored by STATIC. |
-| 000b | Group B on | 1 | Reads 0. Writes return application error 0x80 until Group B is implemented. Capability bit B is clear. |
+| 000b | Group B on | 1 | 0=off, 1=on. |
 
 Coordinates must be finite and inside the supported sRGB triangle, including gradient endpoint writes while MONO is selected. The [lighting API guide](lighting-api.md) defines color interpolation, effects and brightness behavior.
 
@@ -42,7 +42,7 @@ A successful write means **queued**, not physically applied. Reads return the mo
 
 The initial cache is seeded from the startup command in `main/main.c`. There are no later local control writers in this firmware. Future buttons or other local controls must share this command state rather than bypassing BLE with direct setter calls, otherwise readback and subsequent field patches can be stale.
 
-Writes to different characteristics are not an atomic transaction. Set a valid gradient endpoint before selecting GRADIENT, a nonzero shift period before selecting CYCLE/RANDOM, and a valid rotation period before selecting LIGHT_HOUSE. Every accepted update restarts animation timing according to the lighting API. For setup without intermediate visible changes, turn Group A off, update settings, then turn it on.
+Writes to different characteristics are not an atomic transaction. Set a valid gradient endpoint before selecting GRADIENT, a nonzero shift period before selecting CYCLE/RANDOM, and a valid rotation period before selecting LIGHT_HOUSE or BREATHING. Every accepted update restarts animation timing according to the lighting API. For setup without intermediate visible changes, turn Group A off, update settings, then turn it on.
 
 | ATT error | Meaning |
 | --- | --- |
@@ -51,9 +51,9 @@ Writes to different characteristics are not an atomic transaction. Set a valid g
 | 0x13 | Invalid boolean, enum, coordinate, brightness or applicable period. |
 | 0x11 | Lighting queue full or insufficient resources; retry after a short delay. |
 | 0x0e | Internal error or lighting not initialized. |
-| 0x80 | Group B is not supported by this firmware. |
+| 0x80 | Requested effect is unsupported by this group (Lighthouse on Group B). |
 
-Disconnecting leaves the last accepted settings active. Reconnecting reads those values. Rebooting restores the startup defaults in `main/main.c`; BLE edits are not persisted.
+Disconnecting leaves the last accepted settings active. Reconnecting reads those values. Accepted Group A edits are saved to NVS after two seconds without another write. Reboot loads the saved settings; missing or invalid saved data falls back to the defaults in `main/main.c`. Wait for the serial `Group A settings saved` message before removing power. GATT success/readback does not confirm flash persistence.
 
 ## Example payloads
 
@@ -88,3 +88,26 @@ Build with `idf.py build`. NVS initializes for radio calibration; no automatic e
 Run `python tests/test_light_color.py --suite ble` for encoding and command handling against the real lighting setter. Existing color and lighting suites remain applicable. These tests do not simulate the BLE radio. The [BLE increment](spec/008-increment-ble-lighting.md) tracks connect/read/write/reconnect and RMT coexistence checks on the board.
 
 Initialization follows the [ESP-IDF 6.0 NimBLE sequence](https://docs.espressif.com/projects/esp-idf/en/v6.0/esp32c3/api-reference/bluetooth/nimble/index.html), checked against the installed ESP-IDF peripheral example and headers. The host task is created explicitly to check allocation failure.
+
+## Group B controls
+
+Group B has four LEDs and all Group A effects except Lighthouse. Existing Group A UUIDs are unchanged. Group B uses the same field encodings and write ordering, independently cached and saved under NVS key `group_b`.
+
+| UUID suffix | Group B field |
+| --- | --- |
+| 000b | On |
+| 000c | Effect: 0, 2, 4, 5 |
+| 000d | Color xy |
+| 000e | Brightness |
+| 000f | Effect period |
+| 0010 | Color mode |
+| 0011 | Gradient end xy |
+| 0012 | Shift mode |
+| 0013 | Shift period |
+| 0014 | Read-only capabilities: `01 35 03 07 03` |
+
+Both capability records advertise group mask 03. Group B Lighthouse writes return 0x80. Initial Group B defaults are off and Solid; reconnect reads the current settings. Refresh service discovery after flashing this GATT extension.
+
+## Device settings service
+
+A second service, `8e7f0100-8f58-4b5c-9d76-2f5a37c41000`, exposes `boot_behavior` at 0101 (0=LAST_STATE, 1=DEFAULT, 2=OFF) and `ble_connection_indicator_enabled` at 0102 (0/1). Both are one-byte read/write-with-response values, saved immediately before acknowledging success. Boot policy applies on the next reboot; the indicator preference applies to future events. Default preferences are LAST_STATE and indicators enabled. See [increment 012](spec/012-increment-device-settings.md) for complete semantics and errors.

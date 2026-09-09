@@ -27,23 +27,23 @@ static float noise(uint64_t time_ms, uint32_t interval_ms, uint32_t seed)
     return a + (b - a) * smooth(fraction);
 }
 
-void candle_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
-                   light_rgb_t pixels[GROUP_A_LED_COUNT])
+void candle_render_count(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
+                   light_rgb_t *pixels, unsigned count)
 {
     // Slow wandering of the flame leans the bright side around the perimeter;
     // faster small movements and local flicker move the shadows independently.
-    float center = GROUP_A_LED_COUNT * noise(elapsed_ms, 1900, seed ^ 0x173au) +
+    float center = count * noise(elapsed_ms, 1900, seed ^ 0x173au) +
                    0.35f * (noise(elapsed_ms, 370, seed ^ 0xb493u) - 0.5f);
-    if (center < 0.0f) center += GROUP_A_LED_COUNT;
-    if (center >= GROUP_A_LED_COUNT) center -= GROUP_A_LED_COUNT;
+    if (center < 0.0f) center += count;
+    if (center >= count) center -= count;
 
     float glow = 0.65f + 0.20f * noise(elapsed_ms, 310, seed ^ 0x847eu) +
                  0.10f * noise(elapsed_ms, 110, seed ^ 0x73b1u) +
                  0.05f * noise(elapsed_ms, 1300, seed ^ 0xc527u);
 
-    for (int i = 0; i < GROUP_A_LED_COUNT; ++i) {
+    for (unsigned i = 0; i < count; ++i) {
         float distance = fabsf(i - center);
-        distance = fminf(distance, GROUP_A_LED_COUNT - distance);
+        distance = fminf(distance, count - distance);
         float lobe = smooth(fmaxf(0.0f, 1.0f - distance / 2.0f));
         float local = noise(elapsed_ms, 170 + 23 * i, seed ^ hash(0x512du + i));
         float height = noise(elapsed_ms, 440, seed ^ hash(0xab37u + i));
@@ -55,4 +55,9 @@ void candle_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
             (uint8_t)lroundf(color.b * level),
         };
     }
+}
+
+void candle_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color, light_rgb_t pixels[GROUP_A_LED_COUNT])
+{
+    candle_render_count(elapsed_ms, seed, color, pixels, GROUP_A_LED_COUNT);
 }

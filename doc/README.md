@@ -1,7 +1,7 @@
 # Specification index
 
 Status: Active  
-Last updated: 2026-09-08
+Last updated: 2026-09-10
 
 This folder contains plain Markdown development specifications. Each spec describes one increment: a small, independently verifiable change.
 
@@ -13,9 +13,11 @@ The [lighting API guide](lighting-api.md) documents the `big_light` and `house_l
 
 Group A's light-control feature set is complete as of 2026-09-08: solid, lighthouse, candle and sparkles effects; MONO/GRADIENT colors; STATIC/CYCLE/RANDOM shifting; and separate shared brightness. Increments 002-007 are completed.
 
-Increment 001 remains In progress solely for six-LED hardware verification: mapping/color order, visual behavior and a 10-minute stability run. Group B window lighting remains unimplemented; `set_house_lights()` is a stub. Phase 1 therefore remains In progress. Phase 2 BLE control is underway in increment 008; phase 3 power management remains planned.
+Increment 001 remains In progress solely for six-LED hardware verification: mapping/color order, visual behavior and a 10-minute stability run. Group B window lighting is implemented in increment 011; hardware verification remains pending. Phase 1 therefore remains In progress. Phase 2 BLE control is underway in increment 008; phase 3 power management remains planned.
 
 The [BLE protocol guide](ble-protocol.md) defines bondless connection behavior, GATT UUIDs, wire formats and error handling.
+
+Increment 009 adds persistent Group A settings with automatic saving and reboot restoration. Implementation and build checks are complete; storage-specific and hardware verification remain pending.
 
 ## Specifications
 
@@ -30,6 +32,10 @@ The [BLE protocol guide](ble-protocol.md) defines bondless connection behavior, 
 | 006 | [Sparkles](spec/006-increment-sparkles.md) | Completed | 2026-09-08 |
 | 007 | [Color modes and shifting](spec/007-increment-color-modes.md) | Completed | 2026-09-08 |
 | 008 | [Bondless BLE lighting control](spec/008-increment-ble-lighting.md) | In progress | 2026-09-08 |
+| 009 | [Persistent lighting settings](spec/009-increment-persistent-settings.md) | In progress | 2026-09-09 |
+| 010 | [BLE connection indicators](spec/010-increment-ble-indicators.md) | In progress | 2026-09-09 |
+| 011 | [Four-LED Group B lighting](spec/011-increment-group-b-lighting.md) | In progress | 2026-09-09 |
+| 012 | [Device settings service](spec/012-increment-device-settings.md) | In progress | 2026-09-10 |
 
 ## Conventions
 

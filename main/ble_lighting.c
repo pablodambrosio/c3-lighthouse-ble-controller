@@ -1,5 +1,7 @@
 #include "ble_lighting.h"
 #include "ble_light_protocol.h"
+#include "light_storage.h"
+#include "device_settings.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -23,13 +25,45 @@ static const ble_uuid128_t field_uuids[] = {
     LIGHT_UUID(1), LIGHT_UUID(2), LIGHT_UUID(3), LIGHT_UUID(4),
     LIGHT_UUID(5), LIGHT_UUID(6), LIGHT_UUID(7), LIGHT_UUID(8),
     LIGHT_UUID(9), LIGHT_UUID(10), LIGHT_UUID(11),
+    LIGHT_UUID(12), LIGHT_UUID(13), LIGHT_UUID(14), LIGHT_UUID(15), LIGHT_UUID(16),
+    LIGHT_UUID(17), LIGHT_UUID(18), LIGHT_UUID(19), LIGHT_UUID(20),
 };
 static const ble_uuid16_t description_uuid = BLE_UUID16_INIT(0x2901);
-static struct ble_gatt_chr_def characteristics[12];
-static struct ble_gatt_dsc_def descriptions[11][2];
+static struct ble_gatt_chr_def characteristics[21];
+static struct ble_gatt_dsc_def descriptions[20][2];
+// Separate service: 8e7f0100-8f58-4b5c-9d76-2f5a37c41000.
+#define SETTINGS_UUID(id) BLE_UUID128_INIT(0x00, 0x10, 0xc4, 0x37, 0x5a, 0x2f, 0x76, 0x9d, 0x5c, 0x4b, 0x58, 0x8f, (id), 0x01, 0x7f, 0x8e)
+static const ble_uuid128_t settings_uuid = SETTINGS_UUID(0);
+static const ble_uuid128_t settings_fields[] = {SETTINGS_UUID(1), SETTINGS_UUID(2)};
+static struct ble_gatt_chr_def settings_characteristics[3];
+static struct ble_gatt_dsc_def settings_descriptions[2][2];
+static int settings_access(uint16_t connection, uint16_t attribute, struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    (void)connection; (void)attribute;
+    unsigned field = (uintptr_t)arg;
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
+        const char *name = field == 1 ? "Boot behavior" : "BLE connection indicator enabled";
+        return os_mbuf_append(ctxt->om, name, strlen(name)) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        uint8_t value = device_settings_get(field);
+        return os_mbuf_append(ctxt->om, &value, 1) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        if (OS_MBUF_PKTLEN(ctxt->om) != 1) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        uint8_t value; uint16_t copied;
+        if (ble_hs_mbuf_to_flat(ctxt->om, &value, 1, &copied) != 0 || copied != 1) return BLE_ATT_ERR_UNLIKELY;
+        esp_err_t err = device_settings_set(field, value);
+        ESP_LOGI(TAG, "Device setting write: field=%u value=%u result=%s", field, value, esp_err_to_name(err));
+        return err == ESP_OK ? 0 : err == ESP_ERR_INVALID_ARG ? BLE_LIGHT_VALUE_NOT_ALLOWED : BLE_ATT_ERR_UNLIKELY;
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
 static const struct ble_gatt_svc_def services[] = {
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &service_uuid.u,
      .characteristics = characteristics},
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &settings_uuid.u,
+     .characteristics = settings_characteristics},
     {0},
 };
 static ble_light_state_t requested;
@@ -67,6 +101,10 @@ static int gatt_access(uint16_t connection, uint16_t attribute,
             return BLE_ATT_ERR_UNLIKELY;
         }
         int result = ble_light_write(&requested, field, value, copied);
+        if (result == BLE_LIGHT_OK) {
+            if (field >= BLE_LIGHT_HOUSE_ON) house_storage_schedule(&requested.house_lights);
+            else light_storage_schedule(&requested.big_light);
+        }
         ESP_LOGI(TAG, "GATT write: conn=%u field=%s result=0x%02x",
                  connection, ble_light_field_name(field), result);
         return result;
@@ -82,6 +120,8 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
+            esp_err_t err = (device_settings_get(2) ? lighting_ble_indicator(true) : ESP_OK);
+            if (err != ESP_OK) ESP_LOGW(TAG, "Connect indicator not queued: %s", esp_err_to_name(err));
             ESP_LOGI(TAG, "BLE connected: handle=%u", event->connect.conn_handle);
         } else {
             ESP_LOGW(TAG, "BLE connection failed: status=%d", event->connect.status);
@@ -89,6 +129,10 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         break;
     case BLE_GAP_EVENT_DISCONNECT:
+        {
+            esp_err_t err = (device_settings_get(2) ? lighting_ble_indicator(false) : ESP_OK);
+            if (err != ESP_OK) ESP_LOGW(TAG, "Disconnect indicator not queued: %s", esp_err_to_name(err));
+        }
         ESP_LOGI(TAG, "BLE disconnected: handle=%u reason=0x%03x",
                  event->disconnect.conn.conn_handle, event->disconnect.reason);
         advertise();
@@ -165,21 +209,21 @@ static void host_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t ble_lighting_init(const big_light_settings_t *startup)
+esp_err_t ble_lighting_init(const big_light_settings_t *startup, const house_lights_settings_t *house)
 {
-    if (!startup) return ESP_ERR_INVALID_ARG;
+    if (!startup || !house) return ESP_ERR_INVALID_ARG;
     if (initialized) return ESP_ERR_INVALID_STATE;
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) return err; // Do not erase unrelated NVS on error.
     err = nimble_port_init();
     if (err != ESP_OK) return err;
 
-    requested = (ble_light_state_t){.big_light = *startup};
+    requested = (ble_light_state_t){.big_light = *startup, .house_lights = *house};
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    for (unsigned i = 0; i < 11; ++i) {
+    for (unsigned i = 0; i < 20; ++i) {
         void *arg = (void *)(uintptr_t)(i + 1);
         descriptions[i][0] = (struct ble_gatt_dsc_def){
             .uuid = &description_uuid.u, .att_flags = BLE_ATT_F_READ,
@@ -187,9 +231,17 @@ esp_err_t ble_lighting_init(const big_light_settings_t *startup)
         };
         characteristics[i] = (struct ble_gatt_chr_def){
             .uuid = &field_uuids[i].u, .access_cb = gatt_access, .arg = arg,
-            .flags = BLE_GATT_CHR_F_READ | (i == 0 ? 0 : BLE_GATT_CHR_F_WRITE),
+            .flags = BLE_GATT_CHR_F_READ | ((i == 0 || i == 19) ? 0 : BLE_GATT_CHR_F_WRITE),
             .descriptors = descriptions[i],
         };
+    }
+    for (unsigned i = 0; i < 2; ++i) {
+        void *arg = (void *)(uintptr_t)(i + 1);
+        settings_descriptions[i][0] = (struct ble_gatt_dsc_def){.uuid = &description_uuid.u,
+            .att_flags = BLE_ATT_F_READ, .access_cb = settings_access, .arg = arg};
+        settings_characteristics[i] = (struct ble_gatt_chr_def){.uuid = &settings_fields[i].u,
+            .access_cb = settings_access, .arg = arg, .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+            .descriptors = settings_descriptions[i]};
     }
     int rc = ble_svc_gap_device_name_set("Lighthouse");
     if (rc == 0) rc = ble_gatts_count_cfg(services);

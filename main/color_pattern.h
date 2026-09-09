@@ -10,3 +10,5 @@ esp_err_t color_pattern_validate(const big_light_settings_t *settings);
 esp_err_t color_pattern_render(const big_light_settings_t *settings,
                                uint64_t elapsed_ms, uint32_t seed,
                                light_rgb_t pixels[GROUP_A_LED_COUNT]);
+
+esp_err_t color_pattern_render_count(const big_light_settings_t *settings, uint64_t elapsed_ms, uint32_t seed, light_rgb_t *pixels, unsigned count);

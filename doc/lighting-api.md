@@ -21,14 +21,14 @@ The public firmware interface is [main/lighting.h](../main/lighting.h). Group A 
 | `gradient_end` | `light_xy_t` | Second gradient x,y endpoint; shares `brightness`. Ignored in MONO. |
 | `shift_period_ms` | `uint32_t` | Full color cycle or each LED's random jump interval. Must be nonzero unless STATIC. |
 
-`house_lights_settings_t` currently contains only `bool on`. `lighting_settings_t` groups both settings structures under the fields `big_light` and `house_lights`; it is a convenience data type, not an atomic update API.
+`house_lights_settings_t` has the same fields as `big_light_settings_t`. `lighting_settings_t` groups both settings structures under the fields `big_light` and `house_lights`; it is a convenience data type, not an atomic update API.
 
 | Effect constant | ID | Current support | Intended behavior |
 | --- | --- | --- | --- |
 | `LIGHT_EFFECT_SOLID` | 0 | Implemented | All six LEDs display the chosen color at the selected brightness. |
-| `LIGHT_EFFECT_LIGHT_HOUSE` | 1 | Implemented | Linear crossfade between adjacent LEDs at 24 fps; `period_ms` per revolution. |
-| `LIGHT_EFFECT_CANDLE` | 2 | Implemented | Wandering bright region across six LEDs with smooth local flicker at 24 fps, using the selected color. |
-| `LIGHT_EFFECT_SPARKLES` | 4 | Implemented | Independent random flashes with a quick rise and slower fade at 24 fps. Selected at startup. |
+| `LIGHT_EFFECT_LIGHT_HOUSE` | 1 | Implemented | Quadratic crossfade between adjacent LEDs at 30 fps; `period_ms` per revolution. |
+| `LIGHT_EFFECT_CANDLE` | 2 | Implemented | Wandering bright region across six LEDs with smooth local flicker at 30 fps, using the selected color. |
+| `LIGHT_EFFECT_SPARKLES` | 4 | Implemented | Independent random flashes with a quick rise and slower fade at 30 fps. Selected at startup. |
 
 ## Color modes and shifting
 
@@ -43,7 +43,7 @@ A gradient requires two endpoints: `color.x/y` and `gradient_end.x/y`. Interpola
 
 For CYCLE, `shift_period_ms` is one full hue revolution or one full gradient rotation. MONO uses a linear-RGB hue wheel starting at the selected hue and retains its saturation; an achromatic starting color uses full saturation and starts at red. Shared luminance remains the requested value, subject to the existing gamut/output ceiling. RANDOM samples hues or gradient positions independently, with staggered per-LED jump times; each LED jumps once per period, without a fade. MONO + RANDOM intentionally allows different LED colors.
 
-STATIC ignores `shift_period_ms`, including zero. Other shift modes accept 1 through UINT32_MAX milliseconds. The 24 fps scheduler may skip changes at short periods; settings updates restart both clocks and random updates start a new variation. Color shifting also animates the SOLID lighting effect. Off and zero brightness clear the LEDs and suspend animation. `period_ms` remains exclusively the lighthouse rotation period.
+STATIC ignores `shift_period_ms`, including zero. Other shift modes accept 1 through UINT32_MAX milliseconds. The 30 fps scheduler may skip changes at short periods; settings updates restart both clocks and random updates start a new variation. Color shifting also animates the SOLID lighting effect. Off and zero brightness clear the LEDs and suspend animation. `period_ms` remains exclusively the lighthouse rotation period.
 
 ```c
 big_light.color_mode = LIGHT_COLOR_GRADIENT;
@@ -110,11 +110,11 @@ To turn off, retain the same structure, set `big_light.on = false`, and call `se
 
 For rotation, set `big_light.effect = LIGHT_EFFECT_LIGHT_HOUSE` and `big_light.period_ms` before submitting. Each frame crossfades from the current logical position to its next neighbour, including position 5 back to 0; all other LEDs are black. Positions 0-5 represent one logical 360-degree revolution; the physical direction follows `chain_index` in `group_a.c`.
 
-The minimum lighthouse period remains six RTOS ticks: 60 ms at the configured 100 Hz tick rate. Zero and shorter periods return `ESP_ERR_INVALID_ARG`, including when off. Milliseconds round up to whole ticks. Converted periods must fit within half the tick counter range; the current 32-bit, 100 Hz configuration accepts the full `uint32_t` millisecond range above the minimum. SOLID, CANDLE and SPARKLES ignore `period_ms` and permit zero. At the fixed 24 fps frame rate, short periods can skip positions or appear stationary because frames sample the same rotation phase.
+The minimum lighthouse period remains six RTOS ticks: 60 ms at the configured 100 Hz tick rate. Zero and shorter periods return `ESP_ERR_INVALID_ARG`, including when off. Milliseconds round up to whole ticks. Converted periods must fit within half the tick counter range; the current 32-bit, 100 Hz configuration accepts the full `uint32_t` millisecond range above the minimum. SOLID, CANDLE and SPARKLES ignore `period_ms` and permit zero. At the fixed 30 fps frame rate, short periods can skip positions or appear stationary because frames sample the same rotation phase.
 
-With MONO + STATIC, interpolation splits the converted linear RGB duty cycles between the two LEDs. The incoming channel gets its rounded fraction; the outgoing channel gets the remainder, so their sum exactly matches the selected channel value. No extra gamma curve is applied to fade weights. At an exact position boundary only one LED is lit; between boundaries at most two adjacent LEDs are lit. For example, a 10000 ms period gives 240 frames per revolution.
+With MONO + STATIC, interpolation splits the converted linear RGB duty cycles between the two LEDs. The incoming channel gets its rounded fraction; the outgoing channel gets the remainder, so their sum exactly matches the selected channel value. The incoming weight is squared handover progress (t * t): the outgoing LED retains 75% at the midpoint and the incoming LED gets 25%. This delays the handover without changing the revolution period. Gradient and shifting colors use the same timing. At an exact position boundary only one LED is lit; between boundaries at most two adjacent LEDs are lit. For example, a 10000 ms period gives 300 frames per revolution.
 
-Every lighthouse settings update, including a period change, restarts the effect at position 0. Off and zero-output brightness clear all LEDs and suspend animation; a solid request immediately displays the selected color pattern on all six LEDs. The owner waits on the settings queue until the next 24 fps frame deadline, so commands can interrupt the wait and render immediately. At the configured 100 Hz tick rate, intervals repeat as 50/40/40/40/40/40 ms, averaging 24 fps. Frame deadlines advance without cumulative transfer-time drift; delayed wakes render the current rotation phase and skip obsolete frames. A failed frame stops automatic updates until another settings request arrives.
+Every lighthouse settings update, including a period change, restarts the effect at position 0. Off and zero-output brightness clear all LEDs and suspend animation; a solid request immediately displays the selected color pattern on all six LEDs. The owner waits on the settings queue until the next 30 fps frame deadline, so commands can interrupt the wait and render immediately. At the configured 100 Hz tick rate, intervals repeat as 50/40/40/40/40/40 ms, averaging 30 fps. Frame deadlines advance without cumulative transfer-time drift; delayed wakes render the current rotation phase and skip obsolete frames. A failed frame stops automatic updates until another settings request arrives.
 
 The setter does not wait for LED transmission. It enqueues a copy in a four-entry FIFO, with no waiting when full. `ESP_OK` means the request was accepted, not that the LEDs have already changed. The lighting task logs successful application or transfer errors; on failure, the physical LEDs may retain the previous frame. There is no hardware-state getter or completion callback yet.
 
@@ -127,7 +127,7 @@ The setter does not wait for LED transmission. It enqueues a copy in a four-entr
 
 Validation errors and a full queue do not enqueue or replace settings. Initialization can also fail due to memory allocation or a driver error. Callers must check these results.
 
-`set_house_lights(const house_lights_settings_t *settings)` defines the Group B API entry point. It currently returns `ESP_ERR_NOT_SUPPORTED` for a non-null argument and `ESP_ERR_INVALID_ARG` for null. It does not configure pins or claim to apply Group B settings.
+`set_house_lights(const house_lights_settings_t *settings)` defines the Group B API entry point. Call `house_lights_init()` once before using it. Group B renders four LEDs on GPIO6 with Solid, Candle, Sparkles and Breathing; Lighthouse returns `ESP_ERR_NOT_SUPPORTED`. Other settings use the same validation and queue semantics as Group A. Color and shift modes operate independently on four positions.
 
 ## Candle effect
 
@@ -141,7 +141,7 @@ err = set_big_light(&big_light);
 
 The six positions receive a low background glow plus a broad, slowly wandering bright region. Small faster changes in its position, shared intensity changes and independent local fluctuations move the illumination pattern without synchronized blinking. Random targets are joined with smooth interpolation at several time scales. There is no fixed revolution or hardcoded orange color.
 
-The effect shares the 24 fps owner-task scheduler. Each settings update starts a new variation; off or zero output sends black and suspends rendering. Switching to solid or lighthouse mode replaces the complete frame immediately. Frames depend on elapsed time and a per-start seed, so delayed updates skip directly to the current flame state. The clock accumulates elapsed ticks across wraparound. Driver failures suspend animation until another request.
+The effect shares the 30 fps owner-task scheduler. Each settings update starts a new variation; off or zero output sends black and suspends rendering. Switching to solid or lighthouse mode replaces the complete frame immediately. Frames depend on elapsed time and a per-start seed, so delayed updates skip directly to the current flame state. The clock accumulates elapsed ticks across wraparound. Driver failures suspend animation until another request.
 
 The resulting shadow movement depends on LED placement and the model's openings. This is an initial visual model to tune on the actual lighthouse; no physical candle accuracy is claimed.
 
@@ -149,7 +149,7 @@ The resulting shadow movement depends on LED placement and the model's openings.
 
 Select `LIGHT_EFFECT_SPARKLES` (ID 4) with any valid color. Each LED independently brightens quickly and fades more slowly to black. Pseudorandom timing, duration (250-650 ms), and peak intensity vary per LED and pulse; dark gaps separate flashes. Channels scale together below the selected PWM ceiling. `period_ms` is ignored and may be zero.
 
-Sparkles shares the 24 fps scheduler, off/zero-output behavior, mode switching, and transfer-failure handling. Each settings update starts a new variation. Time-based rendering skips missed frames directly and uses the shared accumulated tick clock. Startup keeps the color in `main/main.c`.
+Sparkles shares the 30 fps scheduler, off/zero-output behavior, mode switching, and transfer-failure handling. Each settings update starts a new variation. Time-based rendering skips missed frames directly and uses the shared accumulated tick clock. Startup keeps the color in `main/main.c`.
 
 Run `python tests/test_light_color.py --suite sparkles` for renderer checks and `--suite lighthouse` for task integration. See [increment 006](spec/006-increment-sparkles.md) for verification status.
 
@@ -163,12 +163,16 @@ With the future power-switch hardware, the controller will translate `on` into t
 
 Call setters from a normal task-context callback, not an interrupt. The single lighting task serializes updates so radio callbacks do not perform LED transfers. The control layer must coordinate changes from multiple clients because each setter replaces a full settings structure.
 
-The [BLE protocol guide](ble-protocol.md) defines the implemented bondless GATT service, explicit field encodings and error mapping. The BLE host caches the startup and last accepted BLE command; reads report accepted settings, not physical output. Future local controls must share that command state. Do not send raw C structures: float representation, enum sizes and padding are not a wire format. Preserve effect IDs 0, 1, 2 and 4; ID 3 is unused and rejected. Validate incoming field lengths, boolean encodings, and numeric ranges; the setter rejects nonfinite floats and unsupported colors. If accepting RGB bytes, validate before narrowing to `uint8_t`. A successful setter call acknowledges queue acceptance only.
+The [BLE protocol guide](ble-protocol.md) defines the implemented bondless GATT service, explicit field encodings and error mapping. The BLE host caches the startup and last accepted BLE command; reads report accepted settings, not physical output. Future local controls must share that command state. Do not send raw C structures: float representation, enum sizes and padding are not a wire format. Preserve effect IDs 0, 1, 2, 4 and 5; ID 3 is unused and rejected. Validate incoming field lengths, boolean encodings, and numeric ranges; the setter rejects nonfinite floats and unsupported colors. If accepting RGB bytes, validate before narrowing to `uint8_t`. A successful setter call acknowledges queue acceptance only.
 
 ## Verification
 
 Run `python tests/test_light_color.py --suite candle` for the pure flame model: output limits, hue preservation, smooth changes, movement across all six positions, repeatable time-based rendering and different seeds. The lighthouse suite also covers candle start/off/restart, zero output, mode switches, delayed frames, tick wraparound and transfer failure. See [increment 005](spec/005-increment-candle.md).
 
-Run `python tests/test_light_color.py --suite lighthouse` for the actual lighting task with simulated queue, clock and strip calls. This covers 24 fps scheduling, full revolutions, interpolation values and conservation of channel totals, the 5-to-0 transition, off/restart, solid and zero-brightness transitions, delayed wakes, tick wraparound, transfer failure and setter validation. It does not verify the physical LED order or RMT waveform. See [increment 004](spec/004-increment-lighthouse-crossfade.md).
+Run `python tests/test_light_color.py --suite lighthouse` for the actual lighting task with simulated queue, clock and strip calls. This covers 30 fps scheduling, full revolutions, interpolation values and conservation of channel totals, the 5-to-0 transition, off/restart, solid and zero-brightness transitions, delayed wakes, tick wraparound, transfer failure and setter validation. It does not verify the physical LED order or RMT waveform. See [increment 004](spec/004-increment-lighthouse-crossfade.md).
 
 Hardware mapping was confirmed during [increment 001](spec/001-increment-group-a-lighting.md). XY/brightness conversion is tracked in [increment 002](spec/002-increment-xy-brightness.md). Run `python tests/test_light_color.py` on Windows with the installed ESP RISC-V GCC and QEMU tools to verify the actual conversion C code. Hardware color accuracy and off/on behavior after this API change still require a board check.
+
+## Breathing
+
+`LIGHT_EFFECT_BREATHING` (ID 5) fades all six LEDs together at 30 fps. A Gaussian envelope with standard deviation 0.15 cycles, normalized to zero at the endpoints and one at the midpoint, starts dark, reaches the selected brightness halfway through `period_ms`, and returns to dark at the end. `period_ms` is one full breath, with the same minimum as Lighthouse (60 ms at 100 Hz); try 4000 ms for a gentle cycle. Very short periods are limited by frame sampling. The quarter-cycle intensity is approximately 24.64%. The Gaussian has a narrower peak than the preceding squared-cosine curve. Both groups share this envelope in `main/breathing.h`. Color modes and shifting still apply beneath the shared intensity envelope. Settings updates restart the breath at dark. BLE advertises effect bit 5; the HTML client exposes Breathing and its period.

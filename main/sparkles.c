@@ -11,10 +11,10 @@ static uint32_t hash(uint32_t value)
     return value ^ (value >> 16);
 }
 
-void sparkles_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
-                     light_rgb_t pixels[GROUP_A_LED_COUNT])
+void sparkles_render_count(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
+                     light_rgb_t *pixels, unsigned count)
 {
-    for (unsigned i = 0; i < GROUP_A_LED_COUNT; ++i) {
+    for (unsigned i = 0; i < count; ++i) {
         uint32_t local_seed = hash(seed ^ (0x9e3779b9u * (i + 1)));
         uint64_t time = elapsed_ms + local_seed % 1200;
         uint32_t random = hash((uint32_t)(time / 1200) ^ local_seed);
@@ -36,4 +36,9 @@ void sparkles_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color,
             (uint8_t)lroundf(color.b * level),
         };
     }
+}
+
+void sparkles_render(uint64_t elapsed_ms, uint32_t seed, light_rgb_t color, light_rgb_t pixels[GROUP_A_LED_COUNT])
+{
+    sparkles_render_count(elapsed_ms, seed, color, pixels, GROUP_A_LED_COUNT);
 }

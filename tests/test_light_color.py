@@ -94,7 +94,7 @@ SECTIONS {
         print("PASS: reference colours, sRGB gamma, 14097 PWM round trips, dimming, "
               "brightness limiting, invalid inputs and output preservation (RISC-V/QEMU).")
     elif suite == "ble":
-        print("PASS: BLE fields, endian encoding, validation, rejected-write preservation, queue pressure and Group B unsupported (RISC-V/QEMU).")
+        print("PASS: BLE fields, endian encoding, validation, rejected-write preservation, queue pressure, independent Group B controls and Lighthouse rejection (RISC-V/QEMU).")
     elif suite == "pattern":
         print("PASS: color modes, shifts, xy interpolation, periods, random independence and validation (RISC-V/QEMU).")
     elif suite == "sparkles":

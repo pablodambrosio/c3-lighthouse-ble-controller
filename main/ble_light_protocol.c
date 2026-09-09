@@ -34,6 +34,8 @@ static void write_float(uint8_t *p, float value)
 
 size_t ble_light_field_size(ble_light_field_t field)
 {
+    if (field == BLE_HOUSE_INFO) return 5;
+    if (field >= BLE_LIGHT_HOUSE_ON && field <= BLE_HOUSE_SHIFT_PERIOD) return ble_light_field_size((ble_light_field_t)(field - 9));
     switch (field) {
     case BLE_LIGHT_INFO: return 5;
     case BLE_LIGHT_COLOR:
@@ -44,14 +46,18 @@ size_t ble_light_field_size(ble_light_field_t field)
     case BLE_LIGHT_ON:
     case BLE_LIGHT_EFFECT:
     case BLE_LIGHT_COLOR_MODE:
-    case BLE_LIGHT_SHIFT_MODE:
-    case BLE_LIGHT_HOUSE_ON: return 1;
+    case BLE_LIGHT_SHIFT_MODE: return 1;
     default: return 0;
     }
 }
 
 const char *ble_light_field_name(ble_light_field_t field)
 {
+    if (field == BLE_HOUSE_INFO) return "Group B capabilities";
+    if (field >= BLE_LIGHT_HOUSE_ON && field <= BLE_HOUSE_SHIFT_PERIOD) {
+        static const char *names[] = {"Group B on", "Group B effect", "Group B color xy", "Group B brightness", "Group B period ms", "Group B color mode", "Group B gradient end xy", "Group B shift mode", "Group B shift period ms"};
+        return names[field - BLE_LIGHT_HOUSE_ON];
+    }
     switch (field) {
     case BLE_LIGHT_INFO: return "Protocol and capabilities";
     case BLE_LIGHT_ON: return "Big light on";
@@ -63,7 +69,6 @@ const char *ble_light_field_name(ble_light_field_t field)
     case BLE_LIGHT_GRADIENT_END: return "Gradient end xy";
     case BLE_LIGHT_SHIFT_MODE: return "Shift mode";
     case BLE_LIGHT_SHIFT_PERIOD: return "Shift period ms";
-    case BLE_LIGHT_HOUSE_ON: return "House lights on (unsupported)";
     default: return "Unknown";
     }
 }
@@ -74,12 +79,16 @@ int ble_light_read(const ble_light_state_t *state, ble_light_field_t field,
     size_t size = ble_light_field_size(field);
     if (!state || !value || !size) return BLE_LIGHT_UNLIKELY;
     if (capacity < size) return BLE_LIGHT_INVALID_LENGTH;
+    if (field == BLE_HOUSE_INFO) { memcpy(value, (uint8_t[]){1, 0x35, 3, 7, 3}, 5); return BLE_LIGHT_OK; }
     const big_light_settings_t *s = &state->big_light;
+    if (field >= BLE_LIGHT_HOUSE_ON && field <= BLE_HOUSE_SHIFT_PERIOD) {
+        s = &state->house_lights; field = (ble_light_field_t)(field - 9);
+    }
     switch (field) {
     case BLE_LIGHT_INFO:
         // Version, effect bitmask, color-mode bitmask, shift-mode bitmask,
         // supported groups bitmask (bit 0 = A; bit 1 = B).
-        memcpy(value, (uint8_t[]){1, 0x17, 0x03, 0x07, 0x01}, 5);
+        memcpy(value, (uint8_t[]){1, 0x37, 0x03, 0x07, 0x03}, 5);
         break;
     case BLE_LIGHT_ON: value[0] = s->on; break;
     case BLE_LIGHT_EFFECT: value[0] = s->effect; break;
@@ -90,7 +99,6 @@ int ble_light_read(const ble_light_state_t *state, ble_light_field_t field,
     case BLE_LIGHT_GRADIENT_END: write_float(value, s->gradient_end.x); write_float(value + 4, s->gradient_end.y); break;
     case BLE_LIGHT_SHIFT_MODE: value[0] = s->shift_mode; break;
     case BLE_LIGHT_SHIFT_PERIOD: write_u32(value, s->shift_period_ms); break;
-    case BLE_LIGHT_HOUSE_ON: value[0] = state->house_lights.on; break;
     default: return BLE_LIGHT_UNLIKELY;
     }
     return BLE_LIGHT_OK;
@@ -112,21 +120,16 @@ int ble_light_write(ble_light_state_t *state, ble_light_field_t field,
                     const uint8_t *value, size_t length)
 {
     if (!state) return BLE_LIGHT_UNLIKELY;
-    if (field == BLE_LIGHT_INFO) return BLE_LIGHT_WRITE_NOT_PERMITTED;
+    if (field == BLE_LIGHT_INFO || field == BLE_HOUSE_INFO) return BLE_LIGHT_WRITE_NOT_PERMITTED;
     size_t size = ble_light_field_size(field);
     if (!size) return BLE_LIGHT_UNLIKELY;
     if (!value || length != size) return BLE_LIGHT_INVALID_LENGTH;
-    big_light_settings_t candidate = state->big_light;
+    bool house = field >= BLE_LIGHT_HOUSE_ON && field <= BLE_HOUSE_SHIFT_PERIOD;
+    big_light_settings_t candidate = house ? state->house_lights : state->big_light;
+    if (house) field = (ble_light_field_t)(field - 9);
     switch (field) {
     case BLE_LIGHT_ON:
-    case BLE_LIGHT_HOUSE_ON:
         if (value[0] > 1) return BLE_LIGHT_VALUE_NOT_ALLOWED;
-        if (field == BLE_LIGHT_HOUSE_ON) {
-            house_lights_settings_t house = {.on = value[0] != 0};
-            int result = att_error(set_house_lights(&house));
-            if (!result) state->house_lights = house;
-            return result;
-        }
         candidate.on = value[0] != 0;
         break;
     case BLE_LIGHT_EFFECT: candidate.effect = (light_effect_t)value[0]; break;
@@ -147,7 +150,7 @@ int ble_light_write(ble_light_state_t *state, ble_light_field_t field,
     case BLE_LIGHT_SHIFT_PERIOD: candidate.shift_period_ms = read_u32(value); break;
     default: return BLE_LIGHT_UNLIKELY;
     }
-    int result = att_error(set_big_light(&candidate));
-    if (!result) state->big_light = candidate;
+    int result = att_error(house ? set_house_lights(&candidate) : set_big_light(&candidate));
+    if (!result) { if (house) state->house_lights = candidate; else state->big_light = candidate; }
     return result;
 }

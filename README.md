@@ -15,7 +15,7 @@ The model is described here as a **slot-together model**: a construction in whic
 | Battery | Power the lighthouse. |
 | DC-DC converter | Convert the battery voltage to the supply required by the LED groups. |
 | Group A: 6 WS2812B LEDs | Simulate the rotating lighthouse light. |
-| Group B: 5 WS2812B LEDs | Illuminate the lighthouse windows from inside. |
+| Group B: 4 WS2812B LEDs | Illuminate the lighthouse windows from inside. |
 | MOSFET power switches, planned for phase 3 | Disconnect power to the LED groups during deep sleep. |
 
 Battery specifications, converter selection, and the power-switch circuit will be defined in the implementation specs.
@@ -33,7 +33,7 @@ Each group has one WS2812B data output and one reserved power-enable output for 
 
 These assignments avoid the ESP32-C3 strapping pins GPIO2, GPIO8, and GPIO9. GPIO4-7 also serve external JTAG functions, so that interface cannot use them while they drive the lighting hardware. The assignments leave the board's UART pins and native USB pins available. Board-label mappings and alternate functions are documented in the [Seeed pin map and strapping-pin guidance](https://wiki.seeedstudio.com/XIAO_ESP32C3_Getting_Started/#pin-map).
 
-Each data output feeds its own chain through a suitable 3.3 V to 5 V logic buffer: six LEDs for Group A and five for Group B. LED power comes from the power supply, not from a GPIO. Both groups share the controller's ground.
+Each data output feeds its own chain through a suitable 3.3 V to 5 V logic buffer: six LEDs for Group A and four for Group B. LED power comes from the power supply, not from a GPIO. Both groups share the controller's ground.
 
 The planned power-enable interface is active high: low means off, high means on. The phase 3 circuit must accept 3.3 V logic and provide an external default-off bias during reset and deep sleep. This specifies the interface to a switch circuit, not a direct connection to a 5 V high-side MOSFET gate. Avoiding strapping pins does not guarantee glitch-free outputs during reset; power switching and data isolation must be verified on hardware.
 
@@ -43,19 +43,19 @@ During phase 1, supply the LEDs directly and leave the reserved power-enable con
 
 ### Group A: rotating light effect
 
-Six downward-facing LEDs replace the previous cross layout; there is no center LED. Positions are numbered 0 through 5 and default to the serial chain order. The lighthouse effect crossfades between adjacent LEDs around a logical 360-degree revolution at 24 fps. Set `big_light.period_ms` to the full rotation time in milliseconds; for example, a 10000 ms period gives 240 frames per revolution. The minimum period remains 60 ms, though fast rotations may skip positions at this frame rate. Physical direction follows the chain mapping; change `chain_index` in `main/group_a.c` if needed.
+Six downward-facing LEDs replace the previous cross layout; there is no center LED. Positions are numbered 0 through 5 and default to the serial chain order. The lighthouse effect crossfades between adjacent LEDs around a logical 360-degree revolution at 30 fps. Set `big_light.period_ms` to the full rotation time in milliseconds; for example, a 10000 ms period gives 300 frames per revolution. The minimum period remains 60 ms, though fast rotations may skip positions at this frame rate. Physical direction follows the chain mapping; change `chain_index` in `main/group_a.c` if needed.
 
 Each frame splits the selected color between two neighbours while preserving their combined channel levels. The [crossfade specification](doc/spec/004-increment-lighthouse-crossfade.md) defines the current animation; the [simple lighthouse specification](doc/spec/003-increment-simple-lighthouse.md) records the earlier on/off implementation.
 
 ### Group B: window illumination
 
-Five LEDs will be placed inside the lighthouse to light its windows. This group will provide interior illumination independently of the rotating light effect.
+Four LEDs will be placed inside the lighthouse to light its windows. This group will provide interior illumination independently of the rotating light effect.
 
 ## Development phases
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 1 - LED driver and lighting effects | Group A light-control features complete; Group A hardware verification and Group B window lighting remain pending. | In progress |
+| 1 - LED driver and lighting effects | Group A light-control features complete; Group A and Group B hardware verification remain pending. | In progress |
 | 2 - BLE interface | Bondless NimBLE GATT control implemented; connection and radio/LED coexistence verification pending. | In progress |
 | 3 - Power management | Reduce battery consumption using ESP32C3 deep sleep and MOSFET switches that cut power to both LED groups during sleep. Define sleep entry, wake-up behavior, and power sequencing in the phase's specs. | Planned |
 
@@ -71,8 +71,10 @@ Connect GPIO4 through the data level buffer to the first LED's DIN, power Group 
 
 From an ESP-IDF 6.0 terminal, build with `idf.py build`. To test on the board, use `idf.py -p COM3 flash monitor`, replacing `COM3` if needed. The first build downloads the pinned LED driver. Exit the serial monitor with `Ctrl+]`.
 
-Solid, lighthouse, candle and sparkles lighting are implemented. Independent color settings support MONO or a two-endpoint xy GRADIENT, with STATIC, CYCLE or per-LED RANDOM shifting controlled by `shift_period_ms`. Startup currently uses GRADIENT + RANDOM. Group B is named `house_lights`; its settings type and setter are defined, but the setter returns `ESP_ERR_NOT_SUPPORTED`. BLE control is implemented with hardware verification pending; power management remains planned. See the [BLE protocol guide](doc/ble-protocol.md) for connection details and all GATT controls. See the [lighting API guide](doc/lighting-api.md) for the calling contract and an example.
+Solid, lighthouse, candle and sparkles lighting are implemented. Independent color settings support MONO or a two-endpoint xy GRADIENT, with STATIC, CYCLE or per-LED RANDOM shifting controlled by `shift_period_ms`. Startup currently uses GRADIENT + RANDOM. Group B is named `house_lights`; it supports four LEDs and all effects except Lighthouse. BLE control is implemented with hardware verification pending; power management remains planned. See the [BLE protocol guide](doc/ble-protocol.md) for connection details and all GATT controls. See the [lighting API guide](doc/lighting-api.md) for the calling contract and an example.
 
 - [Specification index](doc/README.md): increment status, last updated dates, and workflow conventions.
 - [Specification template](doc/SPEC_TEMPLATE.md): starting point for each new increment.
 - [Application entry point](main/main.c): firmware implementation.
+
+Group B is implemented on GPIO6 with four LEDs, independent Solid/Candle/Sparkles/Breathing, color modes, shifts, BLE and storage. See [increment 011](doc/spec/011-increment-group-b-lighting.md). Hardware verification remains pending.

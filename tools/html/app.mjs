@@ -1,6 +1,7 @@
 import {SERVICE, uuid, fields, decode, encode, rgbToXy, xyToHex, plan} from './protocol.mjs';
 const $ = id => document.getElementById(id);
-let device, server, characteristics, current, capabilities, busy = false, generation = 0;
+let deviceFields;
+let service, device, server, characteristics, current, capabilities, busy = false, generation = 0;
 const supported = window.isSecureContext && !!navigator.bluetooth;
 function report(message, error = false) {
   $('status').textContent = message;
@@ -11,6 +12,8 @@ function buttons() {
   const connected = !!server?.connected;
   $('connect').disabled = !supported || busy || connected;
   $('disconnect').disabled = !connected || busy;
+  $('group').disabled = !connected || !current || busy;
+  $('device-controls').disabled = !connected || !deviceFields || busy;
   $('controls').disabled = !connected || !current || busy;
   $('connection').textContent = connected ? (device.name || 'Lighthouse') : 'Disconnected';
 }
@@ -34,12 +37,13 @@ function render(s) {
 function preview() {
   const s = getForm();
   $('brightness-label').textContent = `${Number((s.brightness*100).toFixed(1))}%`;
-  $('ring').replaceChildren(...Array.from({length:6},(_,i) => {
-    const t = s.color_mode === 1 ? (i <= 3 ? i/3 : (6-i)/3) : 0;
+  $('ring').replaceChildren(...Array.from({length:$('group').value === 'B' ? 4 : 6},(_,i) => {
+    const count = $('group').value === 'B' ? 4 : 6;
+    const t = s.color_mode === 1 ? 1 - Math.abs(2*i/count-1) : 0;
     const xy = {x:s.color.x*(1-t)+s.gradient_end.x*t,y:s.color.y*(1-t)+s.gradient_end.y*t};
     const led = document.createElement('span'); led.className = 'led';
-    led.style.left = `${50+43*Math.sin(i*Math.PI/3)}%`;
-    led.style.top = `${50-43*Math.cos(i*Math.PI/3)}%`;
+    led.style.left = `${50+43*Math.sin(i*2*Math.PI/count)}%`;
+    led.style.top = `${50-43*Math.cos(i*2*Math.PI/count)}%`;
     led.style.setProperty('--led',xyToHex(xy));
     led.style.opacity = s.on ? .15+.85*s.brightness : .1;
     led.title = `LED ${i}`; return led;
@@ -58,7 +62,14 @@ async function readAll(token) {
 }
 async function write(key,value,token) {
   guard(token);
-  await characteristics[key].writeValueWithResponse(encode(key,value));
+  const payload = encode(key,value);
+  const hex = Array.from(new Uint8Array(payload.buffer),byte => byte.toString(16).padStart(2,'0')).join(' ');
+  report(`Writing: ${key} = ${JSON.stringify(value)} [${hex}]`);
+  try {
+    await characteristics[key].writeValueWithResponse(payload);
+  } catch (error) {
+    throw new Error(`Write ${key} [${hex}] failed: ${error.name}: ${error.message}`);
+  }
   guard(token);
   report(`Accepted: ${key} = ${JSON.stringify(value)}`);
   // Leave time for the four-entry firmware queue to drain; errors remain visible.
@@ -74,7 +85,7 @@ async function run(action) {
 }
 $('connect').addEventListener('click',() => run(async () => {
   report('Choose your Lighthouse in the Bluetooth dialog…');
-  device = await navigator.bluetooth.requestDevice({filters:[{services:[SERVICE]}]});
+  device = await navigator.bluetooth.requestDevice({filters:[{services:[SERVICE]}], optionalServices:[uuid(0x100)]});
   const selected = device;
   const token = ++generation;
   selected.addEventListener('gattserverdisconnected',() => {
@@ -84,24 +95,75 @@ $('connect').addEventListener('click',() => run(async () => {
   },{once:true});
   try {
     server = await selected.gatt.connect(); guard(token);
-    const service = await server.getPrimaryService(SERVICE); guard(token);
-    const info = await (await service.getCharacteristic(uuid(1))).readValue(); guard(token);
-    if (info.byteLength !== 5 || info.getUint8(0) !== 1 || !(info.getUint8(4)&1)) throw new Error('This device does not support Group A protocol v1.');
-    capabilities = Array.from(new Uint8Array(info.buffer,info.byteOffset,info.byteLength));
-    characteristics = {};
-    for (const [key,[id]] of Object.entries(fields)) {
-      characteristics[key] = await service.getCharacteristic(uuid(id)); guard(token);
-    }
-    for (const [key,index] of [['effect',1],['color_mode',2],['shift_mode',3]]) {
-      for (const option of $(key).options) option.disabled = !(capabilities[index] & (1 << Number(option.value)));
-    }
-    await readAll(token); report('Connected. Current Group A settings loaded.');
+    service = await server.getPrimaryService(SERVICE); guard(token);
+    $('group').value = 'A';
+    await loadGroup(token);
+    await loadDeviceSettings(token);
+    await readAll(token); report('Connected. Current group settings loaded.');
   } catch (error) { selected.gatt.disconnect(); current = null; throw error; }
 }));
+async function loadGroup(token) {
+  const house = $('group').value === 'B';
+  const info = await (await service.getCharacteristic(uuid(house ? 20 : 1))).readValue(); guard(token);
+  if (info.byteLength !== 5 || info.getUint8(0) !== 1 || !(info.getUint8(4) & (house ? 2 : 1))) throw new Error('Selected group is unsupported by this firmware.');
+  capabilities = Array.from(new Uint8Array(info.buffer,info.byteOffset,info.byteLength));
+  $('group').options[1].disabled = !(capabilities[4] & 2);
+  report('Device capabilities: ' + capabilities.map(v => v.toString(16).padStart(2,'0')).join(' '));
+  characteristics = {};
+  for (const [key,[id]] of Object.entries(fields)) {
+    characteristics[key] = await service.getCharacteristic(uuid(id + (house ? 9 : 0))); guard(token);
+  }
+  for (const [key,index] of [['effect',1],['color_mode',2],['shift_mode',3]]) {
+    for (const option of $(key).options) option.disabled = !(capabilities[index] & (1 << Number(option.value)));
+  }
+  $('group-label').textContent = house ? 'GROUP B - FOUR LEDS' : 'GROUP A - SIX LEDS';
+}
+$('group').addEventListener('change',() => run(async token => {
+  current = null;
+  try { await loadGroup(token); await readAll(token); report('Group ' + $('group').value + ' settings loaded.'); }
+  catch (error) { device?.gatt.disconnect(); throw error; }
+}));
+async function readDeviceSettings(token) {
+  const boot = await deviceFields[0].readValue(); guard(token);
+  const indicator = await deviceFields[1].readValue(); guard(token);
+  if (boot.byteLength !== 1 || boot.getUint8(0) > 2 || indicator.byteLength !== 1 || indicator.getUint8(0) > 1) throw new Error('Invalid device settings response');
+  $('boot_behavior').value = boot.getUint8(0);
+  $('ble_indicator').checked = !!indicator.getUint8(0);
+}
+async function loadDeviceSettings(token) {
+  deviceFields = null;
+  try {
+    const settingsService = await server.getPrimaryService(uuid(0x100)); guard(token);
+    const boot = await settingsService.getCharacteristic(uuid(0x101)); guard(token);
+    const indicator = await settingsService.getCharacteristic(uuid(0x102)); guard(token);
+    deviceFields = [boot,indicator];
+    await readDeviceSettings(token);
+    $('device-status').textContent = 'Loaded. Boot behavior applies on reboot; indicator changes apply to future BLE events.';
+  } catch (error) {
+    deviceFields = null;
+    $('device-status').textContent = 'Device settings unavailable: ' + error.message;
+    guard(token);
+  }
+}
+$('save-device').addEventListener('click',() => {
+  const boot = Number($('boot_behavior').value), indicator = Number($('ble_indicator').checked);
+  run(async token => {
+    guard(token);
+    try {
+      await deviceFields[0].writeValueWithResponse(Uint8Array.of(boot)); guard(token);
+      await deviceFields[1].writeValueWithResponse(Uint8Array.of(indicator)); guard(token);
+      await readDeviceSettings(token);
+      report('Device settings saved. Boot behavior applies on next reboot.');
+    } catch (error) {
+      if (server?.connected) { try { await readDeviceSettings(token); } catch {} }
+      throw new Error('Device settings save stopped; one setting may have changed: ' + error.message);
+    }
+  });
+});
 $('disconnect').addEventListener('click',() => device?.gatt.disconnect());
 $('refresh').addEventListener('click',() => run(async token => { await readAll(token); report('Read current accepted settings; local edits discarded.'); }));
 $('off').addEventListener('click',() => run(async token => {
-  await write('on',0,token); await readAll(token); report('Group A off. Current settings loaded; local edits discarded.');
+  await write('on',0,token); await readAll(token); report('Selected group off. Current settings loaded; local edits discarded.');
 }));
 $('form').addEventListener('submit',event => {
   event.preventDefault();
@@ -115,7 +177,7 @@ $('form').addEventListener('submit',event => {
     try {
       for (const [key,value] of steps) await write(key,value,token);
       await readAll(token);
-      report(steps.length ? 'Settings accepted and read back from Group A.' : 'Settings already match the device.');
+      report(steps.length ? 'Settings accepted and read back from selected group.' : 'Settings already match the device.');
     } catch (error) {
       let recovered = false;
       if (server?.connected && token === generation) {

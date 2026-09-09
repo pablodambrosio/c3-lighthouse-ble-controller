@@ -12,17 +12,28 @@
     <div class="actions"><button id="connect" class="primary">Connect via Bluetooth</button><button id="disconnect" disabled>Disconnect</button></div>
   </section>
   <p id="status" role="status" aria-live="polite">Connect to load the current Group A settings.</p>
+  <label for="group">Lighting group (switching discards local edits)</label><select id="group" disabled><option value="A">Group A - 6 LEDs</option><option value="B">Group B - 4 LEDs</option></select>
+  <section class="card">
+    <h2>Device settings</h2>
+    <fieldset id="device-controls" disabled>
+      <label for="boot_behavior">On reboot</label>
+      <select id="boot_behavior"><option value="0">Restore last state</option><option value="1">Use firmware defaults</option><option value="2">Start both groups off</option></select>
+      <label><input id="ble_indicator" type="checkbox"> Show blue/red BLE connection indicators</label>
+      <button id="save-device" type="button">Save device settings</button>
+    </fieldset>
+    <p class="hint" id="device-status">Connect to read device settings. Boot behavior applies on the next reboot.</p>
+  </section>
   <form id="form">
     <fieldset id="controls" disabled>
       <div class="layout">
         <div class="stack">
           <section class="card"><div class="section-title"><h2>01 / Light</h2><label class="toggle"><input id="on" type="checkbox"> On after applying</label></div>
-            <label for="effect">Effect</label><select id="effect"><option value="0">Solid</option><option value="1">Lighthouse</option><option value="2">Candle</option><option value="4">Sparkles</option></select>
+            <label for="effect">Effect</label><select id="effect"><option value="0">Solid</option><option value="1">Lighthouse</option><option value="2">Candle</option><option value="4">Sparkles</option><option value="5">Breathing</option></select>
             <label for="brightness">Brightness <output id="brightness-label">100%</output></label>
             <input id="brightness" type="range" min="0" max="100" step="0.1" value="100">
             <p class="hint">Shared relative luminance for both colors.</p>
             <label for="period_ms">Lighthouse rotation · milliseconds</label><input id="period_ms" type="number" min="0" max="4294967295" step="1" value="10000" required>
-            <p class="hint">One revolution. Minimum 60 ms for Lighthouse; ignored by other effects.</p>
+            <p class="hint">One revolution or full breath. Minimum 60 ms for Lighthouse and Breathing; ignored by other effects.</p>
           </section>
           <section class="card"><h2>02 / Color</h2>
             <label for="color_mode">Color mode</label><select id="color_mode"><option value="0">Mono · one color</option><option value="1">Gradient · start → end → start</option></select>
@@ -39,13 +50,13 @@
             <p class="hint">Must be greater than zero for Cycle and Random.</p>
           </section>
         </div>
-        <aside class="stack"><section class="card preview"><p class="eyebrow">GROUP A · SIX LEDS</p><div id="ring" aria-label="Static color layout preview"></div><h2>Color layout</h2><p class="hint">Approximate static colors, before effects or shifting. Screen colors are not calibrated to your LEDs.</p></section>
+        <aside class="stack"><section class="card preview"><p class="eyebrow" id="group-label">GROUP A - SIX LEDS</p><div id="ring" aria-label="Static color layout preview"></div><h2>Color layout</h2><p class="hint">Approximate static colors, before effects or shifting. Screen colors are not calibrated to your LEDs.</p></section>
           <section class="card"><h2>Send to lighthouse</h2><p>Edits stay here until you apply. Multi-field updates briefly turn the lights off, then restore your chosen power state.</p><button type="submit" class="primary wide">Apply settings</button><button id="refresh" type="button" class="wide">Read device / discard edits</button><button id="off" type="button" class="wide">Turn off now</button><p class="hint">Writes are sequential, not atomic. Readback confirms accepted commands, not measured light output.</p></section>
         </aside>
       </div>
     </fieldset>
   </form>
   <details class="card"><summary>Activity log</summary><pre id="log" aria-live="polite"></pre></details>
-  <footer>Protocol v1 · Group A only · No account, cloud, or build step.</footer>
+  <footer>Protocol v1 · Groups A and B · No account, cloud, or build step.</footer>
 </main><script type="module" src="app.mjs"></script>
 </body></html>

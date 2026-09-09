@@ -46,7 +46,7 @@ export function xyToHex(xy) {
 }
 export function validate(s, capabilities) {
   if (![0,1].includes(s.on)) throw new Error('Power must be on or off.');
-  for (const [key, index, allowed] of [['effect',1,[0,1,2,4]],['color_mode',2,[0,1]],['shift_mode',3,[0,1,2]]]) {
+  for (const [key, index, allowed] of [['effect',1,[0,1,2,4,5]],['color_mode',2,[0,1]],['shift_mode',3,[0,1,2]]]) {
     if (!allowed.includes(s[key]) || !(capabilities[index] & (1 << s[key]))) throw new Error(`Unsupported ${key}.`);
   }
   if (!validXy(s.color)) throw new Error('Start color must be inside the sRGB triangle.');
@@ -55,7 +55,7 @@ export function validate(s, capabilities) {
   for (const key of ['period_ms','shift_period_ms']) {
     if (!Number.isInteger(s[key]) || s[key] < 0 || s[key] > 4294967295) throw new Error(`${key} must be a whole number from 0 to 4294967295.`);
   }
-  if (s.effect === 1 && s.period_ms < 60) throw new Error('Lighthouse rotation must be at least 60 ms.');
+  if ([1,5].includes(s.effect) && s.period_ms < 60) throw new Error('Rotation / breath must be at least 60 ms.');
   if (s.shift_mode !== 0 && s.shift_period_ms === 0) throw new Error('Moving colors need a nonzero shift period.');
 }
 // Compare wire values so untouched float32 coordinates are never rewritten through a color picker.
@@ -71,7 +71,7 @@ export function plan(current, desired, capabilities) {
   const put = (key,value) => { if (changed(key,state[key],value)) { steps.push([key,value]); state[key]=value; } };
   if (edits.length && state.on) put('on',0);
   // Disable dependent modes before allowing their periods to become zero.
-  if (desired.effect !== 1) put('effect',desired.effect);
+  if (![1,5].includes(desired.effect)) put('effect',desired.effect);
   if (desired.shift_mode === 0) put('shift_mode',0);
   if (desired.color_mode === 0) put('color_mode',0);
   for (const key of ['color','gradient_end','brightness','period_ms','shift_period_ms','effect','color_mode','shift_mode']) put(key,desired[key]);

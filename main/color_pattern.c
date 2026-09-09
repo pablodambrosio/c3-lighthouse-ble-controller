@@ -71,9 +71,9 @@ static light_xy_t hue_color(float hue, float saturation)
     return color;
 }
 
-esp_err_t color_pattern_render(const big_light_settings_t *settings,
+esp_err_t color_pattern_render_count(const big_light_settings_t *settings,
                                uint64_t elapsed_ms, uint32_t seed,
-                               light_rgb_t pixels[GROUP_A_LED_COUNT])
+                               light_rgb_t *pixels, unsigned count)
 {
     float phase = settings->shift_mode == LIGHT_SHIFT_STATIC ? 0.0f :
         (elapsed_ms % settings->shift_period_ms) / (float)settings->shift_period_ms;
@@ -81,7 +81,7 @@ esp_err_t color_pattern_render(const big_light_settings_t *settings,
     if (settings->color_mode == LIGHT_COLOR_MONO && settings->shift_mode != LIGHT_SHIFT_STATIC) {
         hue_components(settings->color, &hue, &saturation);
     }
-    for (unsigned i = 0; i < GROUP_A_LED_COUNT; ++i) {
+    for (unsigned i = 0; i < count; ++i) {
         float point = 0;
         if (settings->shift_mode == LIGHT_SHIFT_RANDOM) {
             uint32_t local = hash(seed ^ (0x9e3779b9u * (i + 1)));
@@ -93,7 +93,7 @@ esp_err_t color_pattern_render(const big_light_settings_t *settings,
             point = (random & 0xffffu) / 65536.0f;
         } else if (settings->color_mode == LIGHT_COLOR_GRADIENT) {
             // A->B->A around the ring avoids a discontinuity at the seam.
-            float position = i / (float)GROUP_A_LED_COUNT - phase;
+            float position = i / (float)count - phase;
             position -= floorf(position);
             point = 1.0f - fabsf(2.0f * position - 1.0f);
         } else {
@@ -111,4 +111,9 @@ esp_err_t color_pattern_render(const big_light_settings_t *settings,
         if (err != ESP_OK) return err;
     }
     return ESP_OK;
+}
+
+esp_err_t color_pattern_render(const big_light_settings_t *settings, uint64_t elapsed_ms, uint32_t seed, light_rgb_t pixels[GROUP_A_LED_COUNT])
+{
+    return color_pattern_render_count(settings, elapsed_ms, seed, pixels, GROUP_A_LED_COUNT);
 }

@@ -1,4 +1,5 @@
 #include <setjmp.h>
+#include <stdlib.h>
 #include <reent.h>
 #include "../main/lighting.c"
 
@@ -9,7 +10,7 @@ struct _reent *__getreent(void) { return &test_reent; }
 static jmp_buf finished;
 static int failure;
 #define CHECK(condition) do { if (!(condition)) { failure = __LINE__; longjmp(finished, 1); } } while (0)
-#define FRAME_WAIT 0 // Delayed-wake tests permit any next 24 fps deadline.
+#define FRAME_WAIT 0 // Delayed-wake tests permit any next 30 fps deadline.
 
 typedef struct {
     TickType_t expected_wait;
@@ -22,10 +23,10 @@ static TickType_t now;
 static TaskFunction_t owner;
 static void *owner_argument;
 static int frame_count, fail_frame = -1;
-static int positions[128]; // -1 means a solid frame.
-static light_rgb_t colors[128];
-static light_rgb_t incoming_colors[128];
-static light_rgb_t candle_frames[128][GROUP_A_LED_COUNT];
+static int positions[160]; // -1 means a solid frame.
+static light_rgb_t colors[160];
+static light_rgb_t incoming_colors[160];
+static light_rgb_t candle_frames[160][GROUP_A_LED_COUNT];
 static big_light_settings_t queued;
 static bool queue_full;
 static uint32_t command_period_ms = 1500;
@@ -60,12 +61,17 @@ BaseType_t xQueueReceive(QueueHandle_t queue, void *item, TickType_t wait)
     if (event_index == event_count) longjmp(finished, 1);
     event_t event = events[event_index++];
     if (event.expected_wait == FRAME_WAIT) {
-        CHECK(wait >= 1 && wait <= 5);
+        CHECK(wait >= 1 && wait <= 4);
     } else {
         CHECK(wait == event.expected_wait);
     }
     now += event.advance;
     if (event.command == -1) return 0;
+    if (event.command == -7 || event.command == -8) {
+        *(big_light_settings_t *)item = (big_light_settings_t){
+            .effect = LIGHT_EFFECT_BLE_INDICATOR, .on = event.command == -7};
+        return pdTRUE;
+    }
     big_light_settings_t settings = {
         .on = event.command != -2 && event.command != -5,
         .effect = (event.command == -5 || event.command == -6) ? LIGHT_EFFECT_CANDLE :
@@ -86,7 +92,7 @@ esp_err_t group_a_init(void) { return ESP_OK; }
 esp_err_t group_a_deinit(void) { return ESP_OK; }
 static esp_err_t frame(int position, light_rgb_t pwm)
 {
-    CHECK(frame_count < 128);
+    CHECK(frame_count < 160);
     positions[frame_count] = position;
     colors[frame_count] = pwm;
     return frame_count++ == fail_frame ? ESP_FAIL : ESP_OK;
@@ -99,7 +105,7 @@ esp_err_t group_a_set_single(uint8_t position, light_rgb_t pwm)
 }
 esp_err_t group_a_set_pair(uint8_t position, light_rgb_t outgoing, light_rgb_t incoming)
 {
-    CHECK(position < 6 && frame_count < 128);
+    CHECK(position < 6 && frame_count < 160);
     CHECK(outgoing.r + incoming.r == 255);
     CHECK(outgoing.g + incoming.g == 150);
     CHECK(outgoing.b + incoming.b == 30);
@@ -108,7 +114,7 @@ esp_err_t group_a_set_pair(uint8_t position, light_rgb_t outgoing, light_rgb_t i
 }
 esp_err_t group_a_set_frame(const light_rgb_t pixels[GROUP_A_LED_COUNT])
 {
-    CHECK(frame_count < 128);
+    CHECK(frame_count < 160);
     for (int i = 0; i < GROUP_A_LED_COUNT; ++i) {
         if (command_color_mode == LIGHT_COLOR_MONO && command_shift_mode == LIGHT_SHIFT_STATIC) {
             CHECK(pixels[i].r <= 255 && pixels[i].g <= 150 && pixels[i].b <= 30);
@@ -167,19 +173,19 @@ int main(void)
     CHECK(set_big_light(&settings) == ESP_ERR_TIMEOUT);
     queue_full = false;
 
-    // At 100 Hz: 50,40,40,40,40,40 ms repeated gives exactly 24 fps.
-    // Five seconds must contain 120 intervals with no rounding drift.
-    event_t cadence[121] = {{portMAX_DELAY, 0, 1}};
-    for (int i = 1; i <= 120; ++i) {
-        TickType_t ticks = i % 6 == 1 ? 5 : 4;
+    // At 100 Hz: 40,30,30 ms repeated gives exactly 30 fps.
+    // Five seconds must contain 150 intervals with no rounding drift.
+    event_t cadence[151] = {{portMAX_DELAY, 0, 1}};
+    for (int i = 1; i <= 150; ++i) {
+        TickType_t ticks = i % 3 == 1 ? 4 : 3;
         cadence[i] = (event_t){ticks, ticks, -1};
     }
     command_period_ms = 5000;
-    int cadence_result = simulate(cadence, 121, UINT32_MAX - 20);
+    int cadence_result = simulate(cadence, 151, UINT32_MAX - 20);
     if (cadence_result) return cadence_result;
     if (setjmp(finished) != 0) return failure;
-    CHECK(now == 479 && frame_count == 121);
-    CHECK(positions[120] == 0 && colors[120].r == 255 && incoming_colors[120].r == 0);
+    CHECK(now == 479 && frame_count == 151);
+    CHECK(positions[150] == 0 && colors[150].r == 255 && incoming_colors[150].r == 0);
     command_period_ms = 1500;
 
     const event_t rotation[] = {
@@ -189,7 +195,7 @@ int main(void)
         {FRAME_WAIT, 10, -1}, {FRAME_WAIT, 10, -1}, {FRAME_WAIT, 10, -1}, {FRAME_WAIT, 10, -1}, {FRAME_WAIT, 10, -1},
         {FRAME_WAIT, 3, -2}, {portMAX_DELAY, 0, 1}, // Off interrupts; restart at 0.
         {FRAME_WAIT, 37, -1}, // Delayed wake renders current phase, not three old frames.
-        {1, 1, 0}, // Next 24 fps deadline is at 380 ms; solid interrupts it.
+        {FRAME_WAIT, 1, 0}, // Solid interrupts the next frame deadline.
         {portMAX_DELAY, 0, -3}, {portMAX_DELAY, 0, -2},
     };
     int result = simulate(rotation, sizeof(rotation) / sizeof(rotation[0]), 0);
@@ -198,11 +204,11 @@ int main(void)
     if (setjmp(finished) != 0) return failure;
     CHECK(frame_count == 22);
     CHECK(positions[0] == 0 && colors[0].r == 255 && incoming_colors[0].r == 0);
-    CHECK(positions[1] == 0 && colors[1].r == 153 && incoming_colors[1].r == 102);
-    CHECK(colors[1].g == 90 && incoming_colors[1].g == 60);
-    CHECK(colors[1].b == 18 && incoming_colors[1].b == 12);
+    CHECK(positions[1] == 0 && colors[1].r == 214 && incoming_colors[1].r == 41);
+    CHECK(colors[1].g == 126 && incoming_colors[1].g == 24);
+    CHECK(colors[1].b == 25 && incoming_colors[1].b == 5);
     CHECK(positions[5] == 2 && colors[5].r == 255 && incoming_colors[5].r == 0);
-    CHECK(positions[14] == 5 && colors[14].r == 102 && incoming_colors[14].r == 153);
+    CHECK(positions[14] == 5 && colors[14].r == 163 && incoming_colors[14].r == 92);
     CHECK(positions[15] == 0 && colors[15].r == 255 && incoming_colors[15].r == 0);
     CHECK(positions[16] == -1 && colors[16].r == 0 && colors[16].g == 0 && colors[16].b == 0);
     CHECK(positions[17] == 0 && colors[17].r == 255 && positions[18] == 1);
@@ -214,7 +220,7 @@ int main(void)
     result = simulate(wrap, 2, UINT32_MAX - 5);
     if (result) return result;
     if (setjmp(finished) != 0) return failure;
-    CHECK(frame_count == 2 && positions[0] == 0 && positions[1] == 0 && incoming_colors[1].r == 102);
+    CHECK(frame_count == 2 && positions[0] == 0 && positions[1] == 0 && incoming_colors[1].r == 41);
 
     const event_t speed_change[] = {
         {portMAX_DELAY, 0, 1}, {FRAME_WAIT, 10, -1}, {FRAME_WAIT, 3, -4}, {FRAME_WAIT, 10, -1},
@@ -223,7 +229,7 @@ int main(void)
     if (result) return result;
     if (setjmp(finished) != 0) return failure;
     CHECK(frame_count == 4 && positions[2] == 0 && colors[2].r == 255);
-    CHECK(positions[3] == 0 && incoming_colors[3].r == 153);
+    CHECK(positions[3] == 0 && incoming_colors[3].r == 92);
 
     command_period_ms = 1000;
     const event_t uneven[] = {
@@ -237,7 +243,7 @@ int main(void)
     CHECK(now == 100 && frame_count == 11);
     CHECK(positions[10] == 0 && colors[10].r == 255);
 
-    command_period_ms = 61; // Rounds to 70 ms; 24 fps samples skip positions.
+    command_period_ms = 61; // Rounds to 70 ms; 30 fps samples skip positions.
     const event_t minimum[] = {
         {portMAX_DELAY, 0, 1}, {FRAME_WAIT, 10, -1},
     };
@@ -250,9 +256,9 @@ int main(void)
     light_rgb_t outgoing, incoming;
     light_rgb_t base = {255, 150, 30};
     CHECK(lighthouse_frame(50, 600, base, &outgoing, &incoming) == 0);
-    CHECK(outgoing.r == 127 && incoming.r == 128 && outgoing.g == 75 && incoming.g == 75);
+    CHECK(outgoing.r == 191 && incoming.r == 64 && outgoing.g == 112 && incoming.g == 38);
     CHECK(lighthouse_frame(550, 600, base, &outgoing, &incoming) == 5);
-    CHECK(outgoing.r == 127 && incoming.r == 128);
+    CHECK(outgoing.r == 191 && incoming.r == 64);
     CHECK(lighthouse_frame(600, 600, base, &outgoing, &incoming) == 0);
     CHECK(outgoing.r == 255 && incoming.r == 0);
     for (unsigned phase = 0; phase < 500; ++phase) {
@@ -271,9 +277,9 @@ int main(void)
     fail_frame = -1;
     command_period_ms = 0;
     const event_t candle_script[] = {
-        {portMAX_DELAY, 0, 2}, {5, 5, -1}, {4, 4, -1}, {4, 30, -1},
-        {3, 1, -5}, {portMAX_DELAY, 0, 2}, {5, 1, 0},
-        {portMAX_DELAY, 0, -6}, {portMAX_DELAY, 0, 2}, {5, 1, -4},
+        {portMAX_DELAY, 0, 2}, {FRAME_WAIT, 5, -1}, {FRAME_WAIT, 4, -1}, {FRAME_WAIT, 30, -1},
+        {FRAME_WAIT, 1, -5}, {portMAX_DELAY, 0, 2}, {FRAME_WAIT, 1, 0},
+        {portMAX_DELAY, 0, -6}, {portMAX_DELAY, 0, 2}, {FRAME_WAIT, 1, -4},
     };
     result = simulate(candle_script, 10, UINT32_MAX - 7);
     if (result) return result;
@@ -291,7 +297,7 @@ int main(void)
     CHECK(changed);
     fail_frame = 1;
     const event_t candle_failure[] = {
-        {portMAX_DELAY, 0, 2}, {5, 5, -1}, {portMAX_DELAY, 0, -5},
+        {portMAX_DELAY, 0, 2}, {FRAME_WAIT, 5, -1}, {portMAX_DELAY, 0, -5},
     };
     result = simulate(candle_failure, 3, 0);
     if (result) return result;
@@ -299,9 +305,9 @@ int main(void)
     CHECK(positions[2] == -1 && colors[2].r == 0);
     fail_frame = -1;
     const event_t sparkle_script[] = {
-        {portMAX_DELAY, 0, 4}, {5, 5, -1}, {4, 30, -1},
-        {3, 1, -2}, {portMAX_DELAY, 0, 4}, {5, 1, 0},
-        {portMAX_DELAY, 0, 2}, {5, 1, 4}, {5, 1, -4},
+        {portMAX_DELAY, 0, 4}, {FRAME_WAIT, 5, -1}, {FRAME_WAIT, 30, -1},
+        {FRAME_WAIT, 1, -2}, {portMAX_DELAY, 0, 4}, {FRAME_WAIT, 1, 0},
+        {portMAX_DELAY, 0, 2}, {FRAME_WAIT, 1, 4}, {FRAME_WAIT, 1, -4},
     };
     result = simulate(sparkle_script, 9, UINT32_MAX - 7);
     if (result) return result;
@@ -312,7 +318,7 @@ int main(void)
     CHECK(positions[6] == -2 && positions[7] == -2 && positions[8] == 0);
     fail_frame = 1;
     const event_t sparkle_failure[] = {
-        {portMAX_DELAY, 0, 4}, {5, 5, -1}, {portMAX_DELAY, 0, -2},
+        {portMAX_DELAY, 0, 4}, {FRAME_WAIT, 5, -1}, {portMAX_DELAY, 0, -2},
     };
     result = simulate(sparkle_failure, 3, 0);
     if (result) return result;
@@ -340,7 +346,7 @@ int main(void)
 
     // All color/shift combinations compose with every lighting effect.
     command_period_ms = 1500;
-    const int effects[] = {0, 1, 2, 4};
+    const int effects[] = {0, 1, 2, 4, 5};
     for (volatile int mode = 0; mode <= 1; ++mode) for (volatile int shift = 0; shift <= 2; ++shift) {
         command_color_mode = (light_color_mode_t)mode;
         command_shift_mode = (light_shift_mode_t)shift;
@@ -364,8 +370,8 @@ int main(void)
     command_color_mode = LIGHT_COLOR_GRADIENT;
     command_shift_mode = LIGHT_SHIFT_CYCLE;
     const event_t pattern_script[] = {
-        {portMAX_DELAY, 0, 0}, {5, 5, -1}, {4, 95, -1}, {5, 1, 1},
-        {5, 1, 2}, {5, 1, 4}, {5, 1, -2},
+        {portMAX_DELAY, 0, 0}, {FRAME_WAIT, 5, -1}, {FRAME_WAIT, 95, -1}, {FRAME_WAIT, 1, 1},
+        {FRAME_WAIT, 1, 2}, {FRAME_WAIT, 1, 4}, {FRAME_WAIT, 1, -2},
     };
     result = simulate(pattern_script, 7, UINT32_MAX - 7);
     if (result) return result;
@@ -386,11 +392,87 @@ int main(void)
     }
     fail_frame = 1;
     const event_t pattern_failure[] = {
-        {portMAX_DELAY, 0, 0}, {5, 5, -1}, {portMAX_DELAY, 0, -2},
+        {portMAX_DELAY, 0, 0}, {FRAME_WAIT, 5, -1}, {portMAX_DELAY, 0, -2},
     };
     result = simulate(pattern_failure, 3, 0);
     if (result) return result;
     if (setjmp(finished) != 0) return failure;
     CHECK(positions[2] == -1 && colors[2].r == 0);
+    command_color_mode = LIGHT_COLOR_MONO;
+    command_shift_mode = LIGHT_SHIFT_STATIC;
+    command_period_ms = 4000;
+    fail_frame = -1;
+    const event_t breathing_script[] = {
+        {portMAX_DELAY, 0, 5}, {FRAME_WAIT, 100, -1},
+        {FRAME_WAIT, 100, -1}, {FRAME_WAIT, 100, -1},
+        {FRAME_WAIT, 100, -1}, {FRAME_WAIT, 1, -2},
+        {portMAX_DELAY, 0, 5},
+    };
+    result = simulate(breathing_script, 7, UINT32_MAX - 50);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(frame_count == 7);
+    for (int i = 0; i < GROUP_A_LED_COUNT; ++i) {
+        CHECK(candle_frames[0][i].r == 0);
+        CHECK(candle_frames[1][i].r == 63);
+        CHECK(candle_frames[2][i].r == 255 && candle_frames[2][i].g == 150);
+        CHECK(candle_frames[3][i].r == 63);
+        CHECK(candle_frames[4][i].r == 0 && candle_frames[6][i].r == 0);
+    }
+    CHECK(positions[5] == -1 && colors[5].r == 0);
+    settings.effect = LIGHT_EFFECT_BREATHING;
+    settings.period_ms = 0;
+    CHECK(set_big_light(&settings) == ESP_ERR_INVALID_ARG);
+    settings.period_ms = 4000;
+    CHECK(set_big_light(&settings) == ESP_OK);
+    const event_t indicator_script[] = {
+        {portMAX_DELAY, 0, 0}, {portMAX_DELAY, 0, -7},
+        {FRAME_WAIT, 30, -1}, {FRAME_WAIT, 30, -1},
+        {portMAX_DELAY, 0, -2}, {portMAX_DELAY, 0, -8},
+        {FRAME_WAIT, 20, -1},
+    };
+    result = simulate(indicator_script, 7, UINT32_MAX - 10);
+    if (result) return result;
+    if (setjmp(finished) != 0) return failure;
+    CHECK(frame_count == 7);
+    CHECK(colors[2].r == 0 && colors[2].g == 0 && colors[2].b == 128);
+    CHECK(colors[3].r == 255 && colors[3].g == 150 && colors[3].b == 30);
+    CHECK(colors[5].r == 128 && colors[5].g == 0 && colors[5].b == 0);
+    CHECK(colors[6].r == 0 && colors[6].g == 0 && colors[6].b == 0);
+    queue_full = true;
+    CHECK(lighting_ble_indicator(true) == ESP_ERR_TIMEOUT);
+    queue_full = false;
+    CHECK(lighting_ble_indicator(false) == ESP_OK);
+    // Reproduce main.c's exact Breathing + Gradient + Random configuration.
+    settings = (big_light_settings_t){.on = true, .effect = LIGHT_EFFECT_BREATHING,
+        .period_ms = 10000, .brightness = 1.0f,
+        .color = light_color_from_pwm((light_rgb_t){255, 120, 0}),
+        .gradient_end = light_color_from_pwm((light_rgb_t){255, 120, 255}),
+        .color_mode = LIGHT_COLOR_GRADIENT, .shift_mode = LIGHT_SHIFT_RANDOM,
+        .shift_period_ms = 7000};
+    CHECK(lighting_validate(&settings) == ESP_OK);
+    command_color_mode = LIGHT_COLOR_GRADIENT;
+    command_shift_mode = LIGHT_SHIFT_RANDOM;
+    frame_count = 0;
+    const unsigned samples[] = {0, 2500, 5000, 7500, 10000};
+    for (unsigned sample = 0; sample < 5; ++sample) {
+        unsigned ms = samples[sample];
+        CHECK(patterned_frame(&settings, ms / 10, 1000, 123) == ESP_OK);
+        light_rgb_t full[GROUP_A_LED_COUNT];
+        CHECK(color_pattern_render(&settings, ms, 123, full) == ESP_OK);
+        for (unsigned led = 0; led < GROUP_A_LED_COUNT; ++led) {
+            light_rgb_t actual = candle_frames[sample][led];
+            if (sample == 0 || sample == 4) {
+                CHECK(actual.r == 0 && actual.g == 0 && actual.b == 0);
+            } else if (sample == 2) {
+                CHECK(actual.r == full[led].r && actual.g == full[led].g && actual.b == full[led].b);
+                CHECK(actual.r > 0);
+            } else {
+                CHECK(fabsf(actual.r - full[led].r * 0.24643995f) <= 0.501f);
+                CHECK(fabsf(actual.g - full[led].g * 0.24643995f) <= 0.501f);
+                CHECK(fabsf(actual.b - full[led].b * 0.24643995f) <= 0.501f);
+            }
+        }
+    }
     return 0;
 }
