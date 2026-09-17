@@ -1,11 +1,66 @@
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "driver/gpio.h"
 #include "lighting.h"
 #include "ble_lighting.h"
 #include "light_storage.h"
 #include "device_settings.h"
 
+#define PMIC_KEEP_ALIVE_GPIO GPIO_NUM_3 // XIAO D1
+#define PMIC_KEEP_ALIVE_PERIOD_US 25000000ULL
+#define PMIC_KEEP_ALIVE_PULSE_US 20000ULL
+
+static esp_timer_handle_t pmic_release_timer;
+static esp_timer_handle_t pmic_period_timer;
+
+static void pmic_release(void *arg)
+{
+    (void)arg;
+    // Open-drain 1 releases the pin to high impedance; it does not drive high.
+    ESP_ERROR_CHECK(gpio_set_level(PMIC_KEEP_ALIVE_GPIO, 1));
+}
+
+static void pmic_pulse(void *arg)
+{
+    (void)arg;
+    ESP_ERROR_CHECK(gpio_set_level(PMIC_KEEP_ALIVE_GPIO, 0));
+    ESP_ERROR_CHECK(esp_timer_start_once(pmic_release_timer, PMIC_KEEP_ALIVE_PULSE_US));
+}
+
+static void pmic_keep_alive_init(void)
+{
+    // Disable the output and pulls before preloading the released output level.
+    gpio_config_t config = {
+        .pin_bit_mask = 1ULL << PMIC_KEEP_ALIVE_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&config));
+    ESP_ERROR_CHECK(gpio_set_level(PMIC_KEEP_ALIVE_GPIO, 1));
+    // gpio_config enables open drain before the output driver, avoiding a high glitch.
+    config.mode = GPIO_MODE_OUTPUT_OD;
+    ESP_ERROR_CHECK(gpio_config(&config));
+
+    const esp_timer_create_args_t release_args = {
+        .callback = pmic_release,
+        .name = "pmic_release",
+    };
+    const esp_timer_create_args_t period_args = {
+        .callback = pmic_pulse,
+        .name = "pmic_period",
+        .skip_unhandled_events = true,
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&release_args, &pmic_release_timer));
+    ESP_ERROR_CHECK(esp_timer_create(&period_args, &pmic_period_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(pmic_period_timer, PMIC_KEEP_ALIVE_PERIOD_US));
+}
+
 void app_main(void)
 {
+    pmic_keep_alive_init();
+
     esp_err_t err = lighting_init();
     if (err != ESP_OK) {
         ESP_LOGE("lighthouse", "Lighting initialization failed: %s", esp_err_to_name(err));

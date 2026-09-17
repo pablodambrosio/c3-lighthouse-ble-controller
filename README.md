@@ -1,7 +1,7 @@
 # Lighthouse
 
 Status: In progress  
-Last updated: 2026-09-08
+Last updated: 2026-09-17
 
 Lighthouse is a battery-powered lighting controller for a laser-cut 3D lighthouse model assembled from flat panels. It will simulate a rotating lighthouse light and illuminate the model's windows using two groups of addressable LEDs.
 
@@ -38,6 +38,16 @@ Each data output feeds its own chain through a suitable 3.3 V to 5 V logic buffe
 The planned power-enable interface is active high: low means off, high means on. The phase 3 circuit must accept 3.3 V logic and provide an external default-off bias during reset and deep sleep. This specifies the interface to a switch circuit, not a direct connection to a 5 V high-side MOSFET gate. Avoiding strapping pins does not guarantee glitch-free outputs during reset; power switching and data isolation must be verified on hardware.
 
 During phase 1, supply the LEDs directly and leave the reserved power-enable connections unused. Independent power switching and protection against powering an unpowered LED through its data input belong to phase 3.
+
+### PMIC keep-alive pin assignment
+
+**D1 / GPIO3** is `PMIC_KEEP_ALIVE`, the MCU output indicating that it is alive. Firmware uses `GPIO_NUM_3`.
+
+Of the available candidates, D0 / GPIO2 is a boot strapping pin and D6 / GPIO21 is UART0 TX. D1 / GPIO3 avoids both functions and does not overlap the LED assignments. See the [Seeed pin map and strapping-pin guidance](https://wiki.seeedstudio.com/XIAO_ESP32C3_Getting_Started/#pin-map).
+
+At application startup, firmware configures the pin as open drain with both internal pull resistors disabled and releases it to high impedance (HZ). Every 25 seconds it pulls low for 20 ms, then returns to HZ; it never actively drives high. The first pulse starts 25 seconds after keep-alive initialization. The 25-second interval is measured between pulse starts, leaving approximately 24.98 seconds in HZ.
+
+Two ESP-IDF timers schedule the pulse and release without blocking lighting or BLE. Timing is subject to timer-task scheduling latency and still needs measurement on hardware. This keep-alive operates while the MCU is awake; sleep behavior belongs to future power-management work. See [increment 013](doc/spec/013-increment-pmic-keep-alive.md).
 
 ## Lighting groups
 

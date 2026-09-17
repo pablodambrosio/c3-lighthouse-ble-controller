@@ -1,7 +1,7 @@
 # Specification index
 
 Status: Active  
-Last updated: 2026-09-10
+Last updated: 2026-09-17
 
 This folder contains plain Markdown development specifications. Each spec describes one increment: a small, independently verifiable change.
 
@@ -36,6 +36,7 @@ Increment 009 adds persistent Group A settings with automatic saving and reboot 
 | 010 | [BLE connection indicators](spec/010-increment-ble-indicators.md) | In progress | 2026-09-09 |
 | 011 | [Four-LED Group B lighting](spec/011-increment-group-b-lighting.md) | In progress | 2026-09-09 |
 | 012 | [Device settings service](spec/012-increment-device-settings.md) | In progress | 2026-09-10 |
+| 013 | [PMIC keep-alive](spec/013-increment-pmic-keep-alive.md) | In progress | 2026-09-17 |
 
 ## Conventions
 
