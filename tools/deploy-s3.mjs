@@ -61,11 +61,15 @@ function getEnvOrArg(envVar, flagName, defaultValue = '') {
 }
 
 function getConfig() {
+  const accessKeyId = getEnvOrArg('AWS_ACCESS_KEY_ID', '--access-key-id');
+  const secretAccessKey = getEnvOrArg('AWS_SECRET_ACCESS_KEY', '--secret-access-key');
   return {
     bucket: getEnvOrArg('S3_BUCKET', '--bucket'),
     region: getEnvOrArg('AWS_REGION', '--region', 'us-east-1'),
-    accessKeyId: getEnvOrArg('AWS_ACCESS_KEY_ID', '--access-key-id'),
-    secretAccessKey: getEnvOrArg('AWS_SECRET_ACCESS_KEY', '--secret-access-key'),
+    accessKeyId,
+    secretAccessKey,
+    apiAccessKeyId: getEnvOrArg('LIGHTSAIL_API_KEY_ID', '--api-key-id', accessKeyId),
+    apiSecretAccessKey: getEnvOrArg('LIGHTSAIL_API_SECRET_KEY', '--api-secret-key', secretAccessKey),
     distributionId: getEnvOrArg('CLOUDFRONT_DISTRIBUTION_ID', '--distribution-id'),
     lightsailDistribution: getEnvOrArg('LIGHTSAIL_DISTRIBUTION_NAME', '--lightsail-distro'),
     endpoint: getEnvOrArg('S3_ENDPOINT', '--endpoint'),
@@ -164,7 +168,7 @@ async function invalidateCloudFrontCache({ distributionId, accessKeyId, secretAc
   });
 }
 
-async function resetLightsailCache({ lightsailDistribution, region, accessKeyId, secretAccessKey }) {
+async function resetLightsailCache({ lightsailDistribution, region, apiAccessKeyId, apiSecretAccessKey }) {
   const host = `lightsail.${region || 'us-east-1'}.amazonaws.com`;
   const bodyJson = JSON.stringify({ distributionName: lightsailDistribution });
 
@@ -202,9 +206,9 @@ async function resetLightsailCache({ lightsailDistribution, region, accessKeyId,
     hash(canonicalRequest)
   ].join('\n');
 
-  const signingKey = getSigningKey(secretAccessKey, date, region || 'us-east-1', 'lightsail');
+  const signingKey = getSigningKey(apiSecretAccessKey, date, region || 'us-east-1', 'lightsail');
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  const authorization = `AWS4-HMAC-SHA256 Credential=${apiAccessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
   return new Promise((resolve, reject) => {
     const req = https.request({
