@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <rect width="512" height="512" rx="96" fill="#0d1117"/>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="30%" r="50%">
+      <stop offset="0%" stop-color="#ffb833" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#ff9900" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#ff9900" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="30%" stop-color="#ff9900" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#ff9900" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="tower" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2a324b"/>
+      <stop offset="50%" stop-color="#3d4766"/>
+      <stop offset="100%" stop-color="#1e2436"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Ambient Glow -->
+  <circle cx="256" cy="150" r="140" fill="url(#glow)"/>
+
+  <!-- Light Beams -->
+  <polygon points="256,150 480,70 480,230" fill="url(#beam)" opacity="0.85"/>
+  <polygon points="256,150 32,70 32,230" fill="url(#beam)" opacity="0.85"/>
+
+  <!-- Base Rocks / Foundation -->
+  <path d="M120 420 Q 256 390 392 420 L 420 450 L 92 450 Z" fill="#1b2030"/>
+
+  <!-- Tower Body -->
+  <polygon points="216,190 296,190 326,420 186,420" fill="url(#tower)"/>
+
+  <!-- Stripes on Tower -->
+  <polygon points="222,230 290,230 298,270 214,270" fill="#e2e8f0" opacity="0.9"/>
+  <polygon points="208,310 304,310 312,350 200,350" fill="#e2e8f0" opacity="0.9"/>
+
+  <!-- Lantern House / Top Gallery -->
+  <rect x="206" y="180" width="100" height="12" rx="4" fill="#64748b"/>
+  <rect x="216" y="130" width="80" height="50" fill="#1e293b" stroke="#64748b" stroke-width="4"/>
+  <!-- Light Bulb Core -->
+  <circle cx="256" cy="155" r="16" fill="#ffffff"/>
+  <circle cx="256" cy="155" r="24" fill="#ffb833" opacity="0.7"/>
+
+  <!-- Roof Dome -->
+  <path d="M210 130 Q 256 80 302 130 Z" fill="#e2e8f0"/>
+  <circle cx="256" cy="82" r="6" fill="#e2e8f0"/>
+</svg>

@@ -12,6 +12,41 @@ Open **http://127.0.0.1:8080** in desktop Chrome or Edge with Bluetooth enabled.
 
 Web Bluetooth requires a supported browser, a secure context (HTTPS or localhost), and a user gesture for the device chooser. For a remote/mobile host use HTTPS; a plain HTTP LAN address is insufficient. See [MDN Web Bluetooth](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API). Opening the HTML directly is not supported because it uses JavaScript modules. The server binds only to localhost and serves a fixed list of client assets.
 
+### Progressive Web App (PWA) & Mobile Installation
+
+The controller is a Progressive Web App (PWA) configured with offline caching via a Service Worker (`sw.js`) and Web App Manifest (`manifest.webmanifest`).
+
+- **Android (Chrome / Edge / Opera):** Open the HTTPS URL in Chrome or Edge, tap the browser menu (⋮), and select **Add to Home screen** or **Install app**. The app installs as a standalone full-screen application with Web Bluetooth capabilities.
+- **iOS / iPadOS:** Safari does not support native Web Bluetooth. iOS users can open the app inside Web Bluetooth-compatible browsers (e.g. *Bluefy* or *WebBLE*).
+- **HTTPS Requirement:** Installing the PWA and using Web Bluetooth remotely requires hosting the `tools/html` assets on an HTTPS server (such as GitHub Pages, AWS S3 with CloudFront, or a reverse proxy with TLS).
+
+### Deploying to Amazon S3 (or S3-compatible Storage)
+
+You can deploy the PWA directly to an S3 bucket using the zero-dependency deployment script [`tools/deploy-s3.mjs`](../deploy-s3.mjs):
+
+```sh
+node tools/deploy-s3.mjs --bucket <your-bucket-name> --access-key-id <key> --secret-access-key <secret> [--region us-east-1] [--public]
+```
+
+Or using environment variables:
+
+```sh
+export S3_BUCKET="my-lighthouse-app"
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_REGION="us-east-1"
+
+node tools/deploy-s3.mjs
+```
+
+The script automatically sets proper MIME types (e.g. `application/manifest+json` for `.webmanifest`, `image/svg+xml` for `.svg`) and Cache-Control headers (`no-cache` for HTML/Service Worker, long-term immutable cache for static assets).
+
+Alternatively, if using the AWS CLI:
+
+```powershell
+.\tools\deploy-s3.ps1 -Bucket "my-lighthouse-app" -Public
+```
+
 The client follows [BLE protocol v1](../../doc/ble-protocol.md): little-endian float32 x,y and brightness, uint32 periods, and byte enums. It checks the capabilities characteristic and serializes writes with responses. Apply sends changed fields only, turns an active group off during configuration, handles mode/period dependencies, and restores the requested power state last. Writes are separate commands, not atomic; on failure the page attempts to reload the accepted state. A failed apply can leave the lights off. It does not retry writes silently. Readback reports accepted commands, not physical LED output. No notifications are available; use Read device to refresh.
 
 Color pickers convert sRGB to CIE x,y using the firmware matrices; they do not change brightness. Black has no chromaticity and maps to D65 white. Use brightness zero or power off for darkness. Numeric coordinates preserve device float32 values unless edited. The group-sized preview shows approximate static A→B→A gradient placement, not an effect animation or a calibrated brightness simulation. An unused endpoint may read as invalid coordinates on older startup configurations; choose a valid end color before enabling Gradient.

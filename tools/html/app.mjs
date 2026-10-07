@@ -199,3 +199,12 @@ $('form').addEventListener('input',preview);
 render({on:1,effect:0,color:rgbToXy('#ff9900'),brightness:1,period_ms:10000,color_mode:1,gradient_end:rgbToXy('#bb55ff'),shift_mode:0,shift_period_ms:7000});
 if (!supported) report(!window.isSecureContext ? 'Open this page over localhost or HTTPS to enable Web Bluetooth.' : 'Web Bluetooth is unavailable. Open this page in a supported browser, such as desktop Chrome or Edge.',true);
 buttons();
+
+if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      console.warn('Service Worker registration failed:', err);
+    });
+  });
+}
+

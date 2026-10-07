@@ -1,8 +1,28 @@
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 // Serve only the client assets, bound to localhost. No dependencies required.
-const assets = {'/':'index.html','/index.html':'index.html','/style.css':'style.css','/app.mjs':'app.mjs','/protocol.mjs':'protocol.mjs'};
-const mime = {html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',mjs:'text/javascript; charset=utf-8'};
+const assets = {
+  '/': 'index.html',
+  '/index.html': 'index.html',
+  '/style.css': 'style.css',
+  '/app.mjs': 'app.mjs',
+  '/protocol.mjs': 'protocol.mjs',
+  '/sw.js': 'sw.js',
+  '/manifest.webmanifest': 'manifest.webmanifest',
+  '/icon.svg': 'icon.svg',
+  '/icon-192.png': 'icon-192.png',
+  '/icon-512.png': 'icon-512.png',
+  '/apple-touch-icon.png': 'apple-touch-icon.png'
+};
+const mime = {
+  html: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8',
+  mjs: 'text/javascript; charset=utf-8',
+  js: 'text/javascript; charset=utf-8',
+  webmanifest: 'application/manifest+json; charset=utf-8',
+  svg: 'image/svg+xml',
+  png: 'image/png'
+};
 http.createServer(async (req,res) => {
   if (!['GET','HEAD'].includes(req.method)) { res.writeHead(405,{Allow:'GET, HEAD'}).end(); return; }
   const file = assets[new URL(req.url,'http://localhost').pathname];
